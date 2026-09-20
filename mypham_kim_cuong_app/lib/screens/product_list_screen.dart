@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/product_repository.dart';
 import '../models/product.dart';
+import '../widgets/code_input_dialog.dart';
 
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({super.key, this.repository});
@@ -15,6 +16,7 @@ class ProductListScreen extends StatefulWidget {
 class _ProductListScreenState extends State<ProductListScreen> {
   late final ProductRepository _repository;
   late List<Product> _products;
+  late final TextEditingController _searchController;
   String _query = '';
   ProductStatus? _filter;
 
@@ -23,6 +25,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
     super.initState();
     _repository = widget.repository ?? MockProductRepository();
     _products = _repository.getProducts();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   List<Product> get _filteredProducts {
@@ -40,6 +49,30 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .toList();
     }
     return list;
+  }
+
+  Future<void> _lookupCode() async {
+    final code = await showCodeInputDialog(
+      context,
+      title: 'Tìm bằng mã',
+      label: 'Barcode / SKU',
+    );
+    if (code == null || code.isEmpty) {
+      return;
+    }
+    final product = _repository.findProductByCode(code);
+    if (product == null) {
+      _showMessage('Không tìm thấy sản phẩm với mã "$code"');
+      return;
+    }
+    _searchController.text = code;
+    setState(() => _query = code);
+    _showMessage('Đã tìm thấy: ${product.name}');
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -60,10 +93,16 @@ class _ProductListScreenState extends State<ProductListScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
+            controller: _searchController,
             onChanged: (value) => setState(() => _query = value),
             decoration: InputDecoration(
               hintText: 'Tìm tên, SKU, mã vạch',
               prefixIcon: const Icon(Icons.search),
+              suffixIcon: IconButton(
+                tooltip: 'Tìm bằng mã',
+                icon: const Icon(Icons.qr_code_scanner),
+                onPressed: _lookupCode,
+              ),
               isDense: true,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),

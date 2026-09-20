@@ -2,6 +2,8 @@ import '../models/product.dart';
 
 abstract class ProductRepository {
   List<Product> getProducts();
+
+  Product? findProductByCode(String code);
 }
 
 class MockProductRepository implements ProductRepository {
@@ -110,4 +112,19 @@ class MockProductRepository implements ProductRepository {
 
   @override
   List<Product> getProducts() => _products;
+
+  @override
+  Product? findProductByCode(String code) {
+    final normalized = code.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    for (final product in _products) {
+      if (product.barcode.toLowerCase() == normalized ||
+          product.sku.toLowerCase() == normalized) {
+        return product;
+      }
+    }
+    return null;
+  }
 }

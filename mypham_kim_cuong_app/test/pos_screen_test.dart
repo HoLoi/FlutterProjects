@@ -7,6 +7,20 @@ Widget _posApp() {
   return const MaterialApp(home: Scaffold(body: PosScreen()));
 }
 
+Future<void> _enterCode(WidgetTester tester, String code) async {
+  await tester.tap(find.byTooltip('Nhập mã'));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    ),
+    code,
+  );
+  await tester.tap(find.text('Tìm'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('Thêm sản phẩm vào giỏ và tổng tiền đúng', (tester) async {
     await tester.pumpWidget(_posApp());
@@ -80,5 +94,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Giỏ hàng trống'), findsOneWidget);
+  });
+
+  testWidgets('POS nhập barcode còn hàng thì thêm vào giỏ', (tester) async {
+    await tester.pumpWidget(_posApp());
+
+    await _enterCode(tester, '893000000001');
+
+    expect(find.text('1 món · Tổng: 189.000 đ'), findsOneWidget);
+    expect(find.textContaining('Đã thêm'), findsOneWidget);
+  });
+
+  testWidgets('POS nhập barcode hết hàng thì báo và không thêm', (tester) async {
+    await tester.pumpWidget(_posApp());
+
+    await _enterCode(tester, '893000000003');
+
+    expect(find.text('Giỏ hàng trống'), findsOneWidget);
+    expect(find.textContaining('đã hết hàng'), findsOneWidget);
+  });
+
+  testWidgets('POS nhập mã không tồn tại thì có thông báo', (tester) async {
+    await tester.pumpWidget(_posApp());
+
+    await _enterCode(tester, '999999999');
+
+    expect(find.text('Giỏ hàng trống'), findsOneWidget);
+    expect(
+      find.textContaining('Không tìm thấy sản phẩm, có thể tạo mới'),
+      findsOneWidget,
+    );
   });
 }

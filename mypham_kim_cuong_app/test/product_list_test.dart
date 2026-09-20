@@ -7,6 +7,20 @@ Widget _productApp() {
   return const MaterialApp(home: Scaffold(body: ProductListScreen()));
 }
 
+Future<void> _lookup(WidgetTester tester, String code) async {
+  await tester.tap(find.byTooltip('Tìm bằng mã'));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    ),
+    code,
+  );
+  await tester.tap(find.text('Tìm'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('Hiển thị danh sách sản phẩm mẫu', (WidgetTester tester) async {
     await tester.pumpWidget(_productApp());
@@ -55,5 +69,25 @@ void main() {
     await tester.pump();
 
     expect(find.text('Không tìm thấy sản phẩm'), findsOneWidget);
+  });
+
+  testWidgets('Product list tìm theo SKU hiển thị đúng sản phẩm',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_productApp());
+
+    await _lookup(tester, 'KC-0005');
+
+    expect(find.text('Nước Tẩy Trang Cho Da Nhạy Cảm'), findsOneWidget);
+    expect(find.text('Son Kem Lì Satin'), findsNothing);
+  });
+
+  testWidgets('Product list tìm mã không tồn tại thì báo rõ ràng',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(_productApp());
+
+    await _lookup(tester, '999999999');
+
+    expect(find.textContaining('Không tìm thấy sản phẩm với mã'), findsOneWidget);
+    expect(find.text('Son Kem Lì Satin'), findsOneWidget);
   });
 }

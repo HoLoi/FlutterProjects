@@ -4,6 +4,7 @@ import '../data/product_repository.dart';
 import '../models/cart_item.dart';
 import '../models/product.dart';
 import '../services/cart_controller.dart';
+import '../widgets/code_input_dialog.dart';
 
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key, this.repository});
@@ -50,12 +51,35 @@ class _PosScreenState extends State<PosScreen> {
   void _addToCart(Product product) {
     final added = _cart.add(product);
     if (!added) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${product.name} đã hết hàng, không thể thêm vào giỏ'),
-        ),
-      );
+      _showMessage('${product.name} đã hết hàng, không thể thêm vào giỏ');
     }
+  }
+
+  Future<void> _lookupCode() async {
+    final code = await showCodeInputDialog(
+      context,
+      title: 'Nhập mã sản phẩm',
+      label: 'Barcode / SKU',
+    );
+    if (code == null || code.isEmpty) {
+      return;
+    }
+    final product = _repository.findProductByCode(code);
+    if (product == null) {
+      _showMessage('Không tìm thấy sản phẩm, có thể tạo mới ở phiên bản sau');
+      return;
+    }
+    if (product.status == ProductStatus.outOfStock) {
+      _showMessage('${product.name} đã hết hàng, không thể thêm vào giỏ');
+      return;
+    }
+    _cart.add(product);
+    _showMessage('Đã thêm "${product.name}" vào giỏ');
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _checkout() async {
@@ -93,10 +117,21 @@ class _PosScreenState extends State<PosScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Màn hình POS', style: theme.textTheme.titleLarge),
+              Expanded(
+                child: Text(
+                  'Màn hình POS',
+                  style: theme.textTheme.titleLarge,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               Text('Bản demo local', style: theme.textTheme.bodySmall),
+              const SizedBox(width: 4),
+              IconButton.filledTonal(
+                tooltip: 'Nhập mã',
+                icon: const Icon(Icons.qr_code_scanner),
+                onPressed: _lookupCode,
+              ),
             ],
           ),
           const SizedBox(height: 12),
