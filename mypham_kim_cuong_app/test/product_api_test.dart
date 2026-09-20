@@ -81,6 +81,71 @@ void main() {
 
       expect(product.category, isNull);
     });
+
+    test('API trả stock_quantity null thì giữ nguyên null (không ép thành 0)',
+        () {
+      final product = ApiProductParser.fromJson({
+        'id': 201,
+        'name': 'Sản phẩm không quản lý tồn kho',
+        'sku': 'KC-0201',
+        'stock_quantity': null,
+        'stock_status': 'instock',
+        'price': 120000,
+      });
+
+      expect(product.stockQuantity, isNull);
+    });
+
+    test('API không gửi stock_quantity thì stockQuantity null', () {
+      final product = ApiProductParser.fromJson({
+        'id': 202,
+        'name': 'Sản phẩm thiếu trường tồn kho',
+        'sku': 'KC-0202',
+        'stock_status': 'instock',
+        'price': 90000,
+      });
+
+      expect(product.stockQuantity, isNull);
+    });
+  });
+
+  group('Fallback labels', () {
+    Product sample({String name = '', String sku = '', String barcode = '', int? stock, double price = 0}) {
+      return Product(
+        id: 1,
+        name: name,
+        sku: sku,
+        barcode: barcode,
+        price: price,
+        stockQuantity: stock,
+        status: ProductStatus.inStock,
+      );
+    }
+
+    test('name rỗng hiển thị fallback tên', () {
+      expect(nameLabel(sample()), 'Sản phẩm chưa có tên');
+      expect(nameLabel(sample(name: 'Son Lì')), 'Son Lì');
+    });
+
+    test('sku rỗng hiển thị Chưa có SKU', () {
+      expect(skuLabel(sample()), 'Chưa có SKU');
+      expect(skuLabel(sample(sku: 'KC-0001')), 'KC-0001');
+    });
+
+    test('barcode rỗng hiển thị Chưa có mã', () {
+      expect(barcodeLabel(sample()), 'Chưa có mã');
+      expect(barcodeLabel(sample(barcode: '893000000001')), '893000000001');
+    });
+
+    test('stock null hiển thị Không quản lý số lượng', () {
+      expect(stockLabel(sample()), 'Không quản lý số lượng');
+      expect(stockLabel(sample(stock: 5)), '5');
+    });
+
+    test('price 0 hiển thị Chưa có giá', () {
+      expect(priceLabel(sample()), 'Chưa có giá');
+      expect(priceLabel(sample(price: 189000)), '189.000 đ');
+    });
   });
 
   group('ApiClient.fetchProducts', () {

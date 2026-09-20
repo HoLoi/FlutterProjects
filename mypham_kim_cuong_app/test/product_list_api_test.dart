@@ -86,6 +86,20 @@ ApiProductRepository _failingRepository() {
   );
 }
 
+ApiProductRepository _repositoryWithData(List<Map<String, dynamic>> data) {
+  return ApiProductRepository(
+    apiClient: ApiClient(
+      httpClient: MockClient((_) async {
+        return http.Response(
+          jsonEncode({'wc_active': true, 'count': data.length, 'data': data}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    ),
+  );
+}
+
 void main() {
   setUp(() {
     AppSettings.baseUrl = 'https://demo.local';
@@ -122,8 +136,8 @@ void main() {
     expect(find.text('Son Kem Lì Satin'), findsOneWidget);
   });
 
-  testWidgets('Lỗi API hiển thị thông báo và quay lại mock được',
-      (tester) async {
+  testWidgets(
+      'Lỗi API hiển thị thông báo và quay lại mock được', (tester) async {
     await tester.pumpWidget(_app(_failingRepository()));
 
     await tester.tap(find.byType(Switch));
@@ -138,6 +152,52 @@ void main() {
 
     expect(find.text('10 sản phẩm'), findsOneWidget);
     expect(find.text('Serum Vitamin C Brightening'), findsOneWidget);
+  });
+
+  testWidgets('nhãn fallback "%s" hiện đúng khi dữ liệu edge-case',
+      (tester) async {
+    await tester.pumpWidget(
+      _app(
+        _repositoryWithData(
+          [
+            {
+              'id': 301,
+              'name': '   ',
+              'sku': '',
+              'barcode': null,
+              'price': 0,
+              'stock_quantity': null,
+              'stock_status': 'instock',
+              'categories': [],
+            },
+            {
+              'id': 302,
+              'name': 'Son Lì Satin',
+              'sku': 'KC-0301',
+              'barcode': '893000000301',
+              'price': 189000,
+              'stock_quantity': 7,
+              'stock_status': 'instock',
+              'categories': [],
+            },
+          ],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Sản phẩm chưa có tên'), findsOneWidget);
+    expect(find.textContaining('Chưa có SKU'), findsOneWidget);
+    expect(find.textContaining('Chưa có mã'), findsOneWidget);
+    expect(find.textContaining('Không quản lý số lượng'), findsOneWidget);
+    expect(find.text('Chưa có giá'), findsOneWidget);
+
+    expect(find.text('Son Lì Satin'), findsOneWidget);
+    expect(find.textContaining('KC-0301'), findsOneWidget);
+    expect(find.textContaining('893000000301'), findsOneWidget);
   });
 
   testWidgets('WooCommerce chưa active hiển thị lỗi rõ ràng', (tester) async {

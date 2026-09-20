@@ -26,7 +26,7 @@ class Product {
   final String sku;
   final String barcode;
   final double price;
-  final int stockQuantity;
+  final int? stockQuantity;
   final ProductStatus status;
   final String? imageUrl;
   final String? category;
@@ -44,3 +44,18 @@ String formatPrice(double price) {
   buffer.write(' đ');
   return buffer.toString();
 }
+
+String nameLabel(Product product) =>
+    product.name.trim().isEmpty ? 'Sản phẩm chưa có tên' : product.name;
+
+String skuLabel(Product product) =>
+    product.sku.trim().isEmpty ? 'Chưa có SKU' : product.sku;
+
+String barcodeLabel(Product product) =>
+    product.barcode.trim().isEmpty ? 'Chưa có mã' : product.barcode;
+
+String stockLabel(Product product) =>
+    product.stockQuantity == null ? 'Không quản lý số lượng' : '${product.stockQuantity}';
+
+String priceLabel(Product product) =>
+    product.price <= 0 ? 'Chưa có giá' : formatPrice(product.price);

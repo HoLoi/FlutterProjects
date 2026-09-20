@@ -189,7 +189,8 @@ class _PosProductTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final outOfStock = product.status == ProductStatus.outOfStock;
-    final stockText = outOfStock ? 'Hết hàng' : 'Tồn kho: ${product.stockQuantity}';
+    final stockText =
+        outOfStock ? 'Hết hàng' : 'Tồn kho: ${stockLabel(product)}';
     final stockStyle = outOfStock
         ? theme.textTheme.bodySmall?.copyWith(
             color: const Color(0xFFC62828),

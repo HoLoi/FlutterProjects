@@ -42,7 +42,7 @@ class ApiProductParser {
       sku: json['sku']?.toString() ?? '',
       barcode: json['barcode']?.toString() ?? '',
       price: (json['price'] as num?)?.toDouble() ?? 0,
-      stockQuantity: stockQuantity ?? 0,
+      stockQuantity: stockQuantity,
       status: _status(stockStatus, stockQuantity),
       imageUrl: json['image_url']?.toString(),
       category: _category(json['categories']),

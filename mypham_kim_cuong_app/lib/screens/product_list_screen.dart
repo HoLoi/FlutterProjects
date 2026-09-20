@@ -369,13 +369,13 @@ class _ProductCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    product.name,
+                    nameLabel(product),
                     style: theme.textTheme.titleSmall
                         ?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'SKU: ${product.sku} · Mã vạch: ${product.barcode}',
+                    'SKU: ${skuLabel(product)} · Mã vạch: ${barcodeLabel(product)}',
                     style: theme.textTheme.bodySmall,
                   ),
                   if (product.category != null) ...[
@@ -387,7 +387,7 @@ class _ProductCard extends StatelessWidget {
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    'Tồn kho: ${product.stockQuantity}',
+                    'Tồn kho: ${stockLabel(product)}',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
@@ -395,7 +395,7 @@ class _ProductCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        formatPrice(product.price),
+                        priceLabel(product),
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: theme.colorScheme.primary,
                           fontWeight: FontWeight.bold,
