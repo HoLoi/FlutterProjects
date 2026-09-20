@@ -1,30 +1,73 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mypham_kim_cuong_app/main.dart';
+import 'package:mypham_kim_cuong_app/models/app_settings.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  setUp(() {
+    AppSettings.baseUrl = '';
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('App khởi động ở màn hình đăng nhập', (tester) async {
+    await tester.pumpWidget(const MyPhamKimCuongApp());
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    expect(find.text('Mỹ Phẩm Kim Cương'), findsOneWidget);
+    expect(find.text('Đăng nhập'), findsOneWidget);
+  });
+
+  testWidgets('Đăng nhập demo mở màn hình chính', (tester) async {
+    await tester.pumpWidget(const MyPhamKimCuongApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Tên đăng nhập'),
+      'admin',
+    );
+    await tester.tap(find.text('Đăng nhập'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Bảng điều khiển'), findsOneWidget);
+  });
+
+  testWidgets('Điều hướng giữa Sản phẩm và POS', (tester) async {
+    await tester.pumpWidget(const MyPhamKimCuongApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Tên đăng nhập'),
+      'admin',
+    );
+    await tester.tap(find.text('Đăng nhập'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Sản phẩm'));
+    await tester.pumpAndSettle();
+    expect(find.text('Chưa có dữ liệu'), findsOneWidget);
+
+    await tester.tap(find.text('POS'));
+    await tester.pumpAndSettle();
+    expect(find.text('Màn hình POS'), findsOneWidget);
+  });
+
+  testWidgets('Cài đặt lưu base URL', (tester) async {
+    await tester.pumpWidget(const MyPhamKimCuongApp());
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Tên đăng nhập'),
+      'admin',
+    );
+    await tester.tap(find.text('Đăng nhập'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.settings));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Địa chỉ website (Base URL)'),
+      'https://demo.local',
+    );
+    await tester.tap(find.text('Lưu cài đặt'));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(AppSettings.baseUrl, 'https://demo.local');
   });
 }
