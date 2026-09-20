@@ -65,9 +65,7 @@ venv/
 *.orig
 
 # --- Release / build artifacts ---
-# QUYẾT ĐỊNH ĐANG CHỜ: có ignore *.zip không?
-# Hiện KHÔNG bật để tránh tự ý loại mypham-kim-cuong-manager.zip khỏi git.
-# Khi chủ dự án xác nhận -> bỏ comment dòng dưới:
-# *.zip
-# *.apk
-# *.aab
+# Local zip artifacts (snapshot plugin, không phải release) — không commit.
+*.zip
+*.apk
+*.aab
