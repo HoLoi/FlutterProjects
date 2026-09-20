@@ -26,7 +26,7 @@ Tài liệu thiết kế chi tiết cũ nằm trong `docs/`, chỉ tham khảo k
 | Phase | Nội dung |
 |---|---|
 | **MVP-1** ✅ | Flutter UI skeleton: login giả, dashboard/sản phẩm/POS placeholder, settings base URL |
-| **MVP-2** | Plugin REST skeleton local: `GET /wp-json/kc/v1/health` (chưa tạo bảng, chưa đụng WooCommerce) |
+| **MVP-2** ✅ | Plugin REST skeleton local: `GET /wp-json/kc/v1/health` (chưa tạo bảng, chưa đụng WooCommerce) |
 | **MVP-3** | App gọi health endpoint, hiển thị online/offline |
 | **MVP-4** | Đọc sản phẩm WooCommerce (chỉ GET, không thêm/sửa/xóa) |
 | **MVP-5** | POS demo: cart trong app, checkout mock, không trừ kho thật |
@@ -34,7 +34,8 @@ Tài liệu thiết kế chi tiết cũ nằm trong `docs/`, chỉ tham khảo k
 ## Môi trường dev
 
 - Flutter 3.47.5 / Dart 3.13.4 — app hiện chạy `flutter analyze` sạch và `flutter test` pass.
-- PHP/Composer local: **chưa cài** — cần cho MVP-2 (test plugin local).
+- PHP/Composer local: **chưa cài** — code plugin chưa lint được bằng `php -l` trên máy; cần cài PHP để test plugin local ở MVP-3.
+- Health endpoint `GET /wp-json/kc/v1/health` (read-only, public) — đã có trong code plugin, chưa chạy trên site thật.
 - Website thật: WordPress + WooCommerce — **chưa được phép đụng**.
 
 ## Đọc thêm

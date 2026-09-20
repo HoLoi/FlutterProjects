@@ -23,6 +23,8 @@ define( 'MKC_MANAGER_FILE', __FILE__ );
 define( 'MKC_MANAGER_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MKC_MANAGER_URL', plugin_dir_url( __FILE__ ) );
 
+require_once MKC_MANAGER_DIR . 'includes/class-rest-api.php';
+
 /**
  * Plugin activation
  */
