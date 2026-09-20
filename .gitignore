@@ -1,0 +1,73 @@
+# ==========================================================================
+# Root .gitignore — MyPham Kim Cuong (monorepo: Flutter app + WP plugin + docs)
+# Nested .gitignore trong mypham_kim_cuong_app/ vẫn được áp dụng bình thường.
+# ==========================================================================
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# --- Secrets / local config (KHÔNG BAO GIỜ commit) ---
+.env
+.env.*
+*.env
+.env.local
+.env.*.local
+secrets.*
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+key.properties
+wp-config.php
+wp-config-local.php
+auth.json
+.htpasswd
+
+# --- WordPress plugin ---
+# (composer/node nếu thêm ở phase sau)
+vendor/
+node_modules/
+composer.lock.bak
+*.log
+debug.log
+wp-content/uploads/
+wp-content/upgrade/
+wp-content/cache/
+
+# --- Flutter / Dart (root-level belt & suspenders) ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+coverage/
+
+# --- Python / misc tooling (nếu có script phụ trợ) ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Tài liệu / tạm ---
+*.tmp
+*.bak
+*.orig
+
+# --- Release / build artifacts ---
+# QUYẾT ĐỊNH ĐANG CHỜ: có ignore *.zip không?
+# Hiện KHÔNG bật để tránh tự ý loại mypham-kim-cuong-manager.zip khỏi git.
+# Khi chủ dự án xác nhận -> bỏ comment dòng dưới:
+# *.zip
+# *.apk
+# *.aab

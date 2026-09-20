@@ -143,10 +143,12 @@ Chi tiết đầy đủ tại `docs/DECISIONS.md`.
 | Working directory | `D:\FlutterProjects` |
 | Flutter | 3.47.5 stable |
 | Dart | 3.13.4 |
-| PHP (local) | **Chưa cài** — cần cài để test plugin/API local |
-| Git | Chưa khởi tạo repo |
-| App scaffold | `mypham_kim_cuong_app` = template `flutter create` mặc định |
-| Plugin scaffold | `mypham-kim-cuong-manager` = folder trống |
+| PHP / Composer (local) | **Chưa cài** — cần cài để test plugin/API local (PHASE 1B/2) |
+| Git | Đã khởi tạo, branch `main`, remote `origin` = `https://github.com/HoLoi/FlutterProjects.git` |
+| Flutter analyze | `No issues found` (đã chạy) |
+| Flutter test | `All tests passed` (widget test scaffold) |
+| App scaffold | `mypham_kim_cuong_app` = template `flutter create` mặc định (chạy được, analyze sạch) |
+| Plugin scaffold | `mypham-kim-cuong-manager` = **skeleton**: plugin header + activate/deactivate stub; `includes/*.php` rỗng |
 
 ---
 
@@ -169,10 +171,10 @@ Nếu là người phát triển mới, đọc theo thứ tự:
 
 ## 7. Trạng thái code scaffold hiện tại
 
-- `mypham_kim_cuong_app/` — scaffold mặc định của `flutter create` (chỉ có app demo đếm số, **chưa có chức năng hệ thống**).
-- `mypham-kim-cuong-manager/` — folder trống (chưa có file plugin thật).
-- **Cả hai chưa phải bản triển khai hoàn chỉnh**, chưa được dùng ở production, **không build APK** từ scaffold này.
-- **PHASE 1 sẽ review lại scaffold**: giữ nguyên nếu phù hợp hoặc tạo lại — quyết định cuối ghi vào `docs/DECISIONS.md`.
+- `mypham_kim_cuong_app/` — scaffold mặc định của `flutter create` (app demo đếm số, **chưa có chức năng hệ thống**); đã review ở PHASE 1A: `flutter analyze` sạch, `flutter test` pass.
+- `mypham-kim-cuong-manager/` — **skeleton plugin** (header + activate/deactivate stub, `includes/*.php` rỗng 0 byte); chưa có migration/endpoint/bảng.
+- **Cả hai chưa phải bản triển khai hoàn chỉnh**, chưa được dùng ở production, **không build APK release** từ scaffold này.
+- PHASE 1A **đã review scaffold**: **giữ nguyên** cả hai (xem `docs/DECISIONS.md` D-28); chỉnh sửa feature bắt đầu ở PHASE 2+.
 - Mọi file `*.zip` xuất hiện trong project đều **chưa được coi là release**; chỉ làm việc với code đã qua code review + test.
 
 ## 8. Production Safety Gate (bắt buộc trước khi chạm production)
@@ -202,5 +204,15 @@ Trước khi triển khai bất kỳ code nào, cần **xác nhận từ chủ d
 
 ---
 
-**Lưu ý pháp lý & hệ thống**: tuân thủ đúng luồng an toàn — luôn backup (theo `docs/17_DEPLOYMENT_PLAN.md`) trước mọi thay đổi trên website thật.# FlutterProjects
-# FlutterProjects
+## 10. Trạng thái PHASE 1 (A / B)
+
+| Mục | Nội dung | Trạng thái |
+|---|---|---|
+| **PHASE 1A** | Local + GitHub + review scaffold (không API/DB/build) | ✅ hoàn tất |
+| **PHASE 1B** | Staging site (bản copy an toàn của website) | ⏸ **pending — chưa có staging/hosting phụ** |
+
+**Gate:** KHÔNG bắt đầu PHASE 2 cho tới khi **có staging site** hoặc **có xác nhận rõ ràng của chủ dự án**. Tuyệt đối không thao tác trên `https://myphamkimcuong.id.vn`.
+
+---
+
+**Lưu ý pháp lý & hệ thống**: tuân thủ đúng luồng an toàn — luôn backup (theo `docs/17_DEPLOYMENT_PLAN.md`) trước mọi thay đổi trên website thật.
