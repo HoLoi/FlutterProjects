@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../services/stock_receiving_controller.dart';
 import 'pos_screen.dart';
 import 'product_list_screen.dart';
 import 'settings_screen.dart';
+import 'stock_receiving_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -13,12 +15,26 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _currentIndex = 0;
+  late final List<Widget> _screens;
+  late final StockReceivingController _stockController;
 
-  static const List<Widget> _screens = <Widget>[
-    _DashboardHomePage(),
-    ProductListScreen(),
-    PosScreen(),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _stockController = StockReceivingController();
+    _screens = <Widget>[
+      const _DashboardHomePage(),
+      const ProductListScreen(),
+      const PosScreen(),
+      StockReceivingScreen(controller: _stockController),
+    ];
+  }
+
+  @override
+  void dispose() {
+    _stockController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +76,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icon(Icons.point_of_sale_outlined),
             selectedIcon: Icon(Icons.point_of_sale),
             label: 'POS',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.warehouse_outlined),
+            selectedIcon: Icon(Icons.warehouse),
+            label: 'Nhập kho',
           ),
         ],
       ),
