@@ -7,9 +7,10 @@ import '../services/cart_controller.dart';
 import '../widgets/code_input_dialog.dart';
 
 class PosScreen extends StatefulWidget {
-  const PosScreen({super.key, this.repository});
+  const PosScreen({super.key, this.repository, this.cart});
 
   final ProductRepository? repository;
+  final CartController? cart;
 
   @override
   State<PosScreen> createState() => _PosScreenState();
@@ -25,13 +26,15 @@ class _PosScreenState extends State<PosScreen> {
   void initState() {
     super.initState();
     _repository = widget.repository ?? MockProductRepository();
-    _cart = CartController();
+    _cart = widget.cart ?? CartController();
     _products = _repository.getProducts();
   }
 
   @override
   void dispose() {
-    _cart.dispose();
+    if (widget.cart == null) {
+      _cart.dispose();
+    }
     super.dispose();
   }
 
