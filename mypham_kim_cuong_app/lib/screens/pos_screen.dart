@@ -273,15 +273,17 @@ class _CartPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Giỏ hàng',
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                    Expanded(
+                      child: Text(
+                        'Giỏ hàng',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
                     ),
                     Text(
                       '${cart.itemCount} món · Tổng: ${formatPrice(cart.subtotal)}',
+                      textAlign: TextAlign.end,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.primary,
                         fontWeight: FontWeight.w600,

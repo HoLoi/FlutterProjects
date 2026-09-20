@@ -82,6 +82,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Bản demo: chưa gọi dữ liệu thật, không sửa '
+                          'WooCommerce. "Kiểm tra kết nối" chỉ xác minh '
+                          'endpoint health của plugin.',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _baseUrlController,
                 keyboardType: TextInputType.url,
