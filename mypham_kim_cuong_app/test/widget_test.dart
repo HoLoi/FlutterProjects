@@ -41,7 +41,7 @@ void main() {
 
     await tester.tap(find.text('Sản phẩm'));
     await tester.pumpAndSettle();
-    expect(find.text('Chưa có dữ liệu'), findsOneWidget);
+    expect(find.text('Danh sách sản phẩm'), findsOneWidget);
 
     await tester.tap(find.text('POS'));
     await tester.pumpAndSettle();
