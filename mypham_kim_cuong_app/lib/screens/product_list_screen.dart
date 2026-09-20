@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../data/api_product_repository.dart';
 import '../data/product_repository.dart';
 import '../models/product.dart';
 import '../widgets/code_input_dialog.dart';
 
 class ProductListScreen extends StatefulWidget {
-  const ProductListScreen({super.key, this.repository});
+  const ProductListScreen({super.key, this.repository, this.apiRepository});
 
   final ProductRepository? repository;
+  final ApiProductRepository? apiRepository;
 
   @override
   State<ProductListScreen> createState() => _ProductListScreenState();
@@ -15,7 +17,12 @@ class ProductListScreen extends StatefulWidget {
 
 class _ProductListScreenState extends State<ProductListScreen> {
   late final ProductRepository _repository;
+  late final ApiProductRepository _apiRepository;
   late List<Product> _products;
+  List<Product> _apiProducts = const [];
+  String? _apiError;
+  bool _apiMode = false;
+  bool _apiLoading = false;
   late final TextEditingController _searchController;
   String _query = '';
   ProductStatus? _filter;
@@ -24,6 +31,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   void initState() {
     super.initState();
     _repository = widget.repository ?? MockProductRepository();
+    _apiRepository = widget.apiRepository ?? ApiProductRepository();
     _products = _repository.getProducts();
     _searchController = TextEditingController();
   }
@@ -34,8 +42,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
     super.dispose();
   }
 
+  List<Product> get _dataProducts => _apiMode ? _apiProducts : _products;
+
   List<Product> get _filteredProducts {
-    var list = _products;
+    var list = _dataProducts;
     if (_filter != null) {
       list = list.where((p) => p.status == _filter).toList();
     }
@@ -75,6 +85,68 @@ class _ProductListScreenState extends State<ProductListScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _toggleApiMode(bool on) async {
+    if (on) {
+      setState(() {
+        _apiMode = true;
+        _apiError = null;
+        _apiLoading = true;
+      });
+      await _reloadApi();
+    } else {
+      setState(() {
+        _apiMode = false;
+        _apiLoading = false;
+        _apiError = null;
+        _query = '';
+        _filter = null;
+        _searchController.clear();
+      });
+    }
+  }
+
+  Future<void> _reloadApi() async {
+    setState(() {
+      _apiLoading = true;
+      _apiError = null;
+    });
+    try {
+      final products = await _apiRepository.fetchAll();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _apiProducts = products;
+        _apiLoading = false;
+        _query = '';
+        _filter = null;
+        _searchController.clear();
+      });
+    } on ApiProductException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _apiProducts = const [];
+        _apiError = error.message;
+        _apiLoading = false;
+      });
+    }
+  }
+
+  String get _countLabel {
+    if (!_apiMode) {
+      return '${_products.length} sản phẩm';
+    }
+    if (_apiLoading) {
+      return 'Đang tải...';
+    }
+    if (_apiError != null) {
+      return 'Lỗi';
+    }
+    return '${_apiProducts.length} sản phẩm';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -88,61 +160,135 @@ class _ProductListScreenState extends State<ProductListScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Danh sách sản phẩm', style: theme.textTheme.titleLarge),
-              Text('${_products.length} sản phẩm', style: theme.textTheme.bodySmall),
+              Text(_countLabel, style: theme.textTheme.bodySmall),
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _searchController,
-            onChanged: (value) => setState(() => _query = value),
-            decoration: InputDecoration(
-              hintText: 'Tìm tên, SKU, mã vạch',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: IconButton(
-                tooltip: 'Tìm bằng mã',
-                icon: const Icon(Icons.qr_code_scanner),
-                onPressed: _lookupCode,
+          Card(
+            margin: EdgeInsets.zero,
+            child: SwitchListTile(
+              dense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              title: const Text('Dùng dữ liệu API thử nghiệm'),
+              subtitle: Text(
+                _apiMode
+                    ? 'Dữ liệu từ WordPress/WooCommerce qua REST (read-only)'
+                    : 'App sẽ gọi REST read-only tới website để lấy sản phẩm thật.',
+                style: theme.textTheme.bodySmall,
               ),
-              isDense: true,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              value: _apiMode,
+              onChanged: _toggleApiMode,
             ),
           ),
           const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _FilterChip(
-                  label: 'Tất cả',
-                  selected: _filter == null,
-                  onSelected: () => setState(() => _filter = null),
+          if (_apiMode && _apiLoading)
+            const Expanded(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_apiMode && _apiError != null)
+            _apiErrorState(theme)
+          else ...[
+            TextField(
+              controller: _searchController,
+              onChanged: (value) => setState(() => _query = value),
+              decoration: InputDecoration(
+                hintText: 'Tìm tên, SKU, mã vạch',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: IconButton(
+                  tooltip: 'Tìm bằng mã',
+                  icon: const Icon(Icons.qr_code_scanner),
+                  onPressed: _lookupCode,
                 ),
-                const SizedBox(width: 8),
-                ...ProductStatus.values.map(
-                  (status) => Padding(
-                    padding: const EdgeInsets.only(left: 0),
-                    child: _FilterChip(
-                      label: status.label,
-                      selected: _filter == status,
-                      onSelected: () => setState(() => _filter = status),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _FilterChip(
+                    label: 'Tất cả',
+                    selected: _filter == null,
+                    onSelected: () => setState(() => _filter = null),
+                  ),
+                  const SizedBox(width: 8),
+                  ...ProductStatus.values.map(
+                    (status) => Padding(
+                      padding: const EdgeInsets.only(left: 0),
+                      child: _FilterChip(
+                        label: status.label,
+                        selected: _filter == status,
+                        onSelected: () => setState(() => _filter = status),
+                      ),
                     ),
                   ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: filtered.isEmpty
+                  ? _emptyState(theme)
+                  : ListView.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) =>
+                          _ProductCard(product: filtered[index]),
+                    ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _apiErrorState(ThemeData theme) {
+    return Expanded(
+      child: Center(
+        child: Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.cloud_off,
+                    size: 40, color: theme.colorScheme.error),
+                const SizedBox(height: 12),
+                const Text(
+                  'Không đọc được dữ liệu API',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _apiError ?? 'Lỗi không xác định',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: _reloadApi,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Thử lại'),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => _toggleApiMode(false),
+                      child: const Text('Quay lại dữ liệu mock'),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: filtered.isEmpty
-                ? _emptyState(theme)
-                : ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) =>
-                        _ProductCard(product: filtered[index]),
-                  ),
-          ),
-        ],
+        ),
       ),
     );
   }
