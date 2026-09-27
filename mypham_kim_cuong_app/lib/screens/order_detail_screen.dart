@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/api_order_repository.dart';
 import '../models/order.dart';
 import '../models/product.dart';
+import '../widgets/product_image_box.dart';
 
 /// Chi tiết đơn hàng, đọc từ `GET /wp-json/kc/v1/orders/{id}` (read-only).
 ///
@@ -402,6 +403,9 @@ class _ItemTile extends StatelessWidget {
 
   final OrderItem item;
 
+  /// Khung ảnh cố định để card không nhảy khi ảnh tải hoặc lỗi.
+  static const double _thumbSize = 56;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -410,7 +414,11 @@ class _ItemTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Ảnh sản phẩm: rỗng/lỗi thì tự hiện Icons.spa.
+            ProductImageBox(imageUrl: item.imageUrl, size: _thumbSize),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -445,6 +453,7 @@ class _ItemTile extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Text(
               formatPrice(item.total),
               style: theme.textTheme.titleSmall?.copyWith(

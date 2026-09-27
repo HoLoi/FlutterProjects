@@ -5,6 +5,7 @@ import '../models/order.dart';
 import '../models/product.dart';
 import '../services/api_client.dart';
 import '../services/auth_session.dart';
+import '../widgets/product_image_box.dart';
 import 'order_detail_screen.dart';
 
 class OrderListScreen extends StatefulWidget {
@@ -393,23 +394,47 @@ class _OrderCard extends StatelessWidget {
   final Order order;
   final VoidCallback onTap;
 
+  /// Khung ảnh nhỏ hơn chi tiết đơn vì card ở đây là ListTile một dòng.
+  static const double _thumbSize = 40;
+
+  /// Sản phẩm đầu tiên của đơn, `null` khi đơn không có sản phẩm.
+  OrderItem? get _firstItem => order.items.isEmpty ? null : order.items.first;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final firstItem = _firstItem;
     return Card(
       margin: EdgeInsets.zero,
       child: ListTile(
         onTap: onTap,
+        // Ảnh sản phẩm đầu tiên trong đơn; thiếu ảnh thì tự hiện Icons.spa.
+        leading: firstItem == null
+            ? null
+            : ProductImageBox(imageUrl: firstItem.imageUrl, size: _thumbSize),
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              '#${order.number}',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
+            // Số đơn co lại được để badge trạng thái không đẩy ra ngoài khi
+            // màn hình hẹp (ảnh leading đã chiếm 40px).
+            Expanded(
+              child: Text(
+                '#${order.number}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            _statusBadge(theme, order.status),
+            const SizedBox(width: 8),
+            // Badge co lại được để màn hình hẹp không tràn dòng tiêu đề.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: _statusBadge(theme, order.status),
+              ),
+            ),
           ],
         ),
         subtitle: Column(

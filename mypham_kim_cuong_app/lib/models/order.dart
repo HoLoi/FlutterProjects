@@ -120,6 +120,7 @@ class OrderItem {
     required this.productId,
     this.variationId = 0,
     this.sku,
+    this.imageUrl,
   });
 
   final int id;
@@ -131,6 +132,13 @@ class OrderItem {
 
   /// Có thể `null` khi sản phẩm đã bị xoá hoặc không có SKU.
   final String? sku;
+
+  /// Ảnh sản phẩm trong `line_items[].image_url` (chỉ có ở API đã cập nhật).
+  ///
+  /// `null` khi sản phẩm bị xoá, sản phẩm chưa có ảnh, hoặc server trả chuỗi
+  /// rỗng; UI tự về placeholder. Ảnh của variation đã được server fallback
+  /// sang ảnh sản phẩm cha nên client không cần xử lý thêm.
+  final String? imageUrl;
 
   final double quantity;
   final double price;
@@ -338,6 +346,8 @@ class ApiOrderParser {
             productId: ApiValue.integerOrZero(item['product_id']),
             variationId: ApiValue.integerOrZero(item['variation_id']),
             sku: ApiValue.text(item['sku']),
+            // `null` và chuỗi rỗng đều thành `null` (không có ảnh).
+            imageUrl: ApiValue.text(item['image_url']),
             quantity: ApiValue.numberOrZero(item['quantity']),
             price: ApiValue.numberOrZero(item['price']),
             subtotal: ApiValue.numberOrZero(item['subtotal']),
