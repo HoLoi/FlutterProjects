@@ -1041,6 +1041,7 @@ class MKC_REST_API {
 					'price'        => $unit_price,
 					'subtotal'     => $subtotal,
 					'total'        => (float) $item->get_total(),
+					'image_url'    => self::product_image_url( $product ),
 				);
 			} catch ( \Throwable $e ) {
 				// Line item hỏng dữ liệu vẫn phải xuất hiện với giá trị null.
@@ -1054,11 +1055,71 @@ class MKC_REST_API {
 					'price'        => null,
 					'subtotal'     => 0.0,
 					'total'        => 0.0,
+					'image_url'    => null,
 				);
 			}
 		}
 
 		return $items;
+	}
+
+	/**
+	 * URL ảnh của sản phẩm/variation, dùng chung cho product và order item.
+	 *
+	 * Chỉ dùng CRUD/API chính thức của WooCommerce: `get_image_id()` để lấy
+	 * attachment id và `wp_get_attachment_image_url()` để đổi sang URL, tuyệt
+	 * đối không đụng SQL và không tải ảnh qua REST.
+	 *
+	 * - Sản phẩm/variation đã bị xoá (không phải WC_Product): null.
+	 * - Variation có ảnh riêng: dùng ảnh đó.
+	 * - Variation chưa có ảnh: dùng ảnh sản phẩm cha.
+	 * - Sản phẩm chưa có ảnh hoặc lỗi khi đọc sản phẩm cha: null.
+	 * - Chỉ trả URL http/https, không trả đường dẫn filesystem.
+	 *
+	 * @param WC_Product|false|null $product Sản phẩm hoặc variation của line item.
+	 * @return string|null
+	 */
+	private static function product_image_url( $product ) {
+		if ( ! $product instanceof WC_Product ) {
+			return null;
+		}
+
+		$image_id = $product->get_image_id();
+
+		if ( ! $image_id && $product->is_type( 'variation' ) ) {
+			$parent_id = (int) $product->get_parent_id();
+
+			if ( $parent_id ) {
+				try {
+					$parent = wc_get_product( $parent_id );
+
+					if ( $parent instanceof WC_Product ) {
+						$image_id = $parent->get_image_id();
+					}
+				} catch ( \Throwable $e ) {
+					// Sản phẩm cha lỗi khi đọc: coi như không có ảnh.
+					$image_id = 0;
+				}
+			}
+		}
+
+		if ( ! $image_id ) {
+			return null;
+		}
+
+		$image_url = wp_get_attachment_image_url( (int) $image_id, 'woocommerce_thumbnail' );
+
+		if ( ! is_string( $image_url ) || '' === $image_url ) {
+			return null;
+		}
+
+		$scheme = wp_parse_url( $image_url, PHP_URL_SCHEME );
+
+		if ( 'http' !== $scheme && 'https' !== $scheme ) {
+			return null;
+		}
+
+		return esc_url_raw( $image_url );
 	}
 
 	/* ---------------------------------------------------------------------
