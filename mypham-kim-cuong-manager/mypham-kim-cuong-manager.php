@@ -24,6 +24,8 @@ define( 'MKC_MANAGER_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MKC_MANAGER_URL', plugin_dir_url( __FILE__ ) );
 
 require_once MKC_MANAGER_DIR . 'includes/class-rest-api.php';
+// Endpoint ghi duy nhất: POST /wp-json/kc/v1/pos/sales.
+require_once MKC_MANAGER_DIR . 'includes/class-pos.php';
 
 /**
  * Plugin activation

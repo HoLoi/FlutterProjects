@@ -8,10 +8,14 @@ Tất cả endpoint thuộc namespace `kc/v1` của plugin `mypham-kim-cuong-man
 Base URL: https://{host}/wp-json/kc/v1
 ```
 
-Giai đoạn hiện tại (MVP-10 → MVP-12) **chỉ dùng GET** — read-only.
+Giai đoạn MVP-10 → MVP-12 **chỉ dùng GET** — read-only.
 
 Từ MVP-12, endpoint đơn hàng (`/orders`, `/orders/{id}`) **yêu cầu xác thực**;
 endpoint catalog vẫn public. Chi tiết ở mục 6.
+
+Từ MVP-13 có **một** endpoint ghi duy nhất: `POST /pos/sales`. Xem
+[POS_API_SPECIFICATION](POS_API_SPECIFICATION.md). Endpoint này mới chỉ có mã
+trong plugin, **chưa upload lên production**.
 
 ## 2. Quy ước chung
 
@@ -216,9 +220,12 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 
 | Đường dẫn | MVP | Ghi chú |
 |---|---|---|
-| `POST /pos/sales` | MVP-13 | Tạo WooCommerce order, có `Idempotency-Key` |
 | `GET /inventory/receivings` | MVP-14 | Nhập kho |
 | `POST /returns` | MVP-15 | Trả hàng |
+
+> `POST /pos/sales` (MVP-13) đã có mã trong `includes/class-pos.php` nhưng
+> **chưa upload production**: xem
+> [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md).
 
 > MVP-12 **không** thêm endpoint `POST /auth/login`. Xác thực dùng sẵn cơ chế
 > Application Password của WordPress, xem mục 6.
@@ -235,6 +242,7 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 | `GET /variations` | Public | Không |
 | `GET /orders` | **Bắt buộc** | Xem đơn hàng |
 | `GET /orders/{id}` | **Bắt buộc** | Xem đơn hàng |
+| `POST /pos/sales` | **Bắt buộc** | `manage_woocommerce` |
 
 "Xem đơn hàng" = `manage_woocommerce`, hoặc `edit_shop_orders`, hoặc
 `read_private_shop_orders` (theo thứ tự ưu tiên).
@@ -255,8 +263,9 @@ Mã lỗi trả về:
 - WordPress tự xác thực và dựng `current_user`; plugin chỉ kiểm tra
   `is_user_logged_in()` và capability, không tự parse header.
 - Không có endpoint trả secret, token hay mật khẩu về app.
-- Vẫn đang **chỉ đọc** (GET). Trước khi ghi dữ liệu thật (bắt đầu MVP-13)
-  phải bổ sung chống ghi trùng (idempotency) và kiểm tra quyền ghi.
+- Endpoint ghi duy nhất là `POST /pos/sales` (`manage_woocommerce`, HTTPS bắt
+  buộc, có idempotency theo `request_id`). Chi tiết ở
+  [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md).
 - Xem [05_SECURITY](05_SECURITY.md).
 
 ## 7. Tài liệu liên quan
