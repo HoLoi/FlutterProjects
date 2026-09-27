@@ -17,6 +17,9 @@ class Product {
     required this.price,
     required this.stockQuantity,
     required this.status,
+    this.regularPrice,
+    this.salePrice,
+    this.productType = '',
     this.imageUrl,
     this.category,
   });
@@ -25,11 +28,38 @@ class Product {
   final String name;
   final String sku;
   final String barcode;
+
+  /// Giá đang bán (`price` trong JSON).
   final double price;
+
+  /// `regular_price` — có thể `null` khi sản phẩm không có giá dạng chuỗi.
+  final double? regularPrice;
+
+  /// `sale_price` — có thể `null` khi sản phẩm không giảm giá.
+  final double? salePrice;
+
+  /// `null` khi sản phẩm không bật quản lý kho (API trả `null`, không phải 0).
   final int? stockQuantity;
+
   final ProductStatus status;
+
+  /// `simple`, `variable`, `grouped` hoặc `external`.
+  final String productType;
   final String? imageUrl;
   final String? category;
+
+  /// Sản phẩm cha có biến thể hay không.
+  bool get hasVariations => productType == 'variable';
+
+  /// Đang giảm giá khi `sale_price` khác `null` và nhỏ hơn `regular_price`.
+  bool get isOnSale {
+    final sale = salePrice;
+    final regular = regularPrice;
+    if (sale == null || regular == null) {
+      return false;
+    }
+    return sale > 0 && sale < regular;
+  }
 }
 
 String formatPrice(double price) {
@@ -59,3 +89,12 @@ String stockLabel(Product product) =>
 
 String priceLabel(Product product) =>
     product.price <= 0 ? 'Chưa có giá' : formatPrice(product.price);
+
+/// Nhãn giá gốc, chỉ hiện khi sản phẩm thực sự đang giảm giá.
+String regularPriceLabel(Product product) {
+  final regular = product.regularPrice;
+  if (!product.isOnSale || regular == null) {
+    return '';
+  }
+  return formatPrice(regular);
+}

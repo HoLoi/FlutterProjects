@@ -107,6 +107,41 @@ class OrderDetailResult {
   bool get succeeded => status == OrderDetailStatus.ok;
 }
 
+enum ProductDetailStatus {
+  ok,
+  notFound,
+  wcInactive,
+  httpError,
+  networkError,
+  invalidUrl,
+}
+
+/// Kết quả `GET /products/{id}`: trả thẳng object sản phẩm, không có envelope.
+class ProductDetailResult {
+  const ProductDetailResult({required this.status, this.data, this.message});
+
+  final ProductDetailStatus status;
+  final Map<String, dynamic>? data;
+  final String? message;
+
+  bool get succeeded => status == ProductDetailStatus.ok;
+}
+
+/// Thông điệp lỗi do server trả về trong JSON lỗi của WordPress.
+///
+/// Mọi lỗi của API có cùng cấu trúc:
+/// `{ "code": "kc_not_found", "message": "...", "data": { "status": 404 } }`
+/// Ngoại lệ đã kiểm tra trên production: khoảng ngày ngược trả
+/// `kc_invalid_date_range`; mọi lỗi tham số cấp khác trả `rest_invalid_param`.
+/// App bắt lỗi theo HTTP status nên không cần phân nhánh theo `code`.
+class ApiErrorBody {
+  const ApiErrorBody({this.code, this.message, this.status});
+
+  final String? code;
+  final String? message;
+  final int? status;
+}
+
 class ApiClient {
   ApiClient({http.Client? httpClient, this.authSession})
     : _httpClient = httpClient ?? http.Client();
@@ -265,12 +300,20 @@ class ApiClient {
     return _fetchCatalog(path: _categoriesPath, query: query);
   }
 
-  /// Danh sách biến thể của một sản phẩm (read-only).
+  /// Danh sách biến thể (read-only).
+  ///
+  /// Bỏ trống [productId] để lấy biến thể của **mọi** sản phẩm đang publish.
+  /// Khi có [productId] trỏ tới sản phẩm cha chưa publish, API trả `404`.
   Future<CatalogResult> fetchVariations({
-    required int productId,
+    int? productId,
     String? search,
+    int perPage = 50,
+    int page = 1,
   }) async {
-    final query = <String, String>{'product_id': '$productId'};
+    final query = <String, String>{'per_page': '$perPage', 'page': '$page'};
+    if (productId != null && productId > 0) {
+      query['product_id'] = '$productId';
+    }
     final sortedSearch = (search?.trim().isEmpty ?? true)
         ? null
         : search!.trim();
@@ -280,10 +323,76 @@ class ApiClient {
     return _fetchCatalog(path: _variationsPath, query: query);
   }
 
+  /// Chi tiết một sản phẩm (read-only, public).
+  Future<ProductDetailResult> fetchProductDetail(int productId) async {
+    final uri = _apiUri(AppSettings.baseUrl, '$_productsPath/$productId');
+    if (uri == null) {
+      return const ProductDetailResult(
+        status: ProductDetailStatus.invalidUrl,
+        message: 'URL chưa hợp lệ',
+      );
+    }
+
+    try {
+      final response = await _httpClient
+          .get(uri, headers: _publicHeaders)
+          .timeout(_timeout);
+
+      if (response.statusCode == 404) {
+        return const ProductDetailResult(
+          status: ProductDetailStatus.notFound,
+          message: 'Không tìm thấy sản phẩm',
+        );
+      }
+
+      if (response.statusCode != 200) {
+        return ProductDetailResult(
+          status: ProductDetailStatus.httpError,
+          message: _errorMessage(response, 'HTTP ${response.statusCode}'),
+        );
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        return const ProductDetailResult(
+          status: ProductDetailStatus.httpError,
+          message: 'Phản hồi không hợp lệ',
+        );
+      }
+
+      if (decoded['wc_active'] != true) {
+        return ProductDetailResult(
+          status: ProductDetailStatus.wcInactive,
+          message: decoded['message']?.toString() ?? 'WooCommerce chưa active',
+        );
+      }
+
+      return ProductDetailResult(
+        status: ProductDetailStatus.ok,
+        data: decoded,
+      );
+    } on TimeoutException {
+      return const ProductDetailResult(
+        status: ProductDetailStatus.networkError,
+        message: 'Hết thời gian chờ phản hồi',
+      );
+    } catch (_) {
+      return const ProductDetailResult(
+        status: ProductDetailStatus.networkError,
+        message: 'Không kết nối được máy chủ',
+      );
+    }
+  }
+
   /// Danh sách đơn hàng WooCommerce (read-only, cần đăng nhập).
+  ///
+  /// [dateFrom] / [dateTo] theo định dạng `YYYY-MM-DD`. Khoảng ngày ngược sẽ bị
+  /// API từ chối bằng HTTP `400` với mã `kc_invalid_date_range`.
   Future<CatalogResult> fetchOrders({
     String? search,
     String? status,
+    String? dateFrom,
+    String? dateTo,
     int perPage = 20,
     int page = 1,
   }) async {
@@ -296,6 +405,12 @@ class ApiClient {
     }
     if (status != null && status.trim().isNotEmpty) {
       query['status'] = status.trim();
+    }
+    if (dateFrom != null && dateFrom.trim().isNotEmpty) {
+      query['date_from'] = dateFrom.trim();
+    }
+    if (dateTo != null && dateTo.trim().isNotEmpty) {
+      query['date_to'] = dateTo.trim();
     }
     return _fetchCatalog(path: _ordersPath, query: query, requireAuth: true);
   }
@@ -346,7 +461,7 @@ class ApiClient {
       if (response.statusCode != 200) {
         return OrderDetailResult(
           status: OrderDetailStatus.httpError,
-          message: 'HTTP ${response.statusCode}',
+          message: _errorMessage(response, 'HTTP ${response.statusCode}'),
         );
       }
 
@@ -501,7 +616,7 @@ class ApiClient {
       if (response.statusCode != 200) {
         return CatalogResult(
           status: CatalogStatus.httpError,
-          message: 'HTTP ${response.statusCode}',
+          message: _errorMessage(response, 'HTTP ${response.statusCode}'),
         );
       }
 
@@ -543,6 +658,56 @@ class ApiClient {
         message: 'Không kết nối được máy chủ',
       );
     }
+  }
+
+  /// Đọc `message` tiếng Việt trong JSON lỗi của WordPress, fallback về [fallback].
+  ///
+  /// Body lỗi có dạng `{ "code": ..., "message": ..., "data": { "status": ... } }`.
+  /// Body rỗng hoặc không phải JSON vẫn phải trả về [fallback] thay vì ném lỗi.
+  String _errorMessage(http.Response response, String fallback) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        final message = decoded['message']?.toString().trim();
+        if (message != null && message.isNotEmpty) {
+          return message;
+        }
+      }
+    } catch (_) {
+      // Body không phải JSON: dùng fallback.
+    }
+    return fallback;
+  }
+
+  /// Đọc toàn bộ JSON lỗi (code + message + status) của WordPress.
+  static ApiErrorBody parseErrorBody(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final data = decoded['data'];
+        return ApiErrorBody(
+          code: decoded['code']?.toString(),
+          message: decoded['message']?.toString(),
+          status: data is Map ? _asInt(data['status']) : null,
+        );
+      }
+    } catch (_) {
+      // Không phải JSON: trả về body rỗng.
+    }
+    return const ApiErrorBody();
+  }
+
+  static int? _asInt(Object? raw) {
+    if (raw is int) {
+      return raw;
+    }
+    if (raw is num) {
+      return raw.toInt();
+    }
+    if (raw is String) {
+      return int.tryParse(raw.trim());
+    }
+    return null;
   }
 
   Uri? _healthUri(String baseUrl) => _apiUri(baseUrl, _healthPath);

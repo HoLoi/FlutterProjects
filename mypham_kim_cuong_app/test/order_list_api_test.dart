@@ -50,34 +50,121 @@ AuthSession _signedIn() {
   return session;
 }
 
-List<Map<String, dynamic>> _orderFixtures() {
-  return [
-    {
-      'id': 501,
-      'number': '501',
-      'status': 'processing',
-      'status_label': 'Đang xử lý',
-      'created_at': '2026-09-20 14:30:00',
-      'customer_name': 'Nguyễn Thị A',
-      'customer_phone': '0900000000',
-      'items_count': 2,
-      'total': 398000,
-      'payment_method_label': 'COD',
+/// Fixture bám sát JSON production của `GET /orders`.
+///
+/// Trả về `[danh sách, chi tiết]` để dùng chung cho cả hai endpoint.
+(List<Map<String, Object?>>, Map<String, Object?>) _orderFixtures() {
+  final listItem = <String, Object?>{
+    'id': 501,
+    'number': '501',
+    'status': 'processing',
+    'status_label': 'Đang xử lý',
+    'date_created': '2026-09-20 14:30:00',
+    'date_paid': null,
+    'payment_method': 'cod',
+    'payment_method_label': 'COD',
+    'payment_status': 'unpaid',
+    'currency': 'VND',
+    'total': 398000,
+    'customer': {
+      'id': 0,
+      'is_guest': true,
+      'name': 'Nguyễn Thị A',
+      'phone': '0900000000',
+      'email': 'a@example.com',
     },
-    {
-      'id': 502,
-      'number': '502',
-      'status': 'cancelled',
-      'status_label': 'Đã huỷ',
-      'customer_name': '',
-      'items_count': 1,
-      'total': 189000,
-      'payment_method_label': '',
+    'billing': {
+      'first_name': 'Nguyễn Thị',
+      'last_name': 'A',
+      'address_1': '123 Nguyễn Huệ',
+      'address_2': '',
+      'city': 'TP. Hồ Chí Minh',
+      'state': '',
+      'postcode': '700000',
+      'country': 'VN',
+      'phone': '0900000000',
+      'email': 'a@example.com',
     },
-  ];
+    'shipping': {
+      'first_name': 'Nguyễn Thị',
+      'last_name': 'A',
+      'address_1': '123 Nguyễn Huệ',
+      'address_2': '',
+      'city': 'TP. Hồ Chí Minh',
+      'state': '',
+      'postcode': '700000',
+      'country': 'VN',
+      'phone': '0900000000',
+      'email': null,
+    },
+    'line_items': [
+      {
+        'id': 11,
+        'product_id': 101,
+        'variation_id': 1001,
+        'name': 'Son Kem Lì Satin',
+        'sku': 'KC-0001-RED',
+        'quantity': 2,
+        'price': 190000,
+        'subtotal': 380000,
+        'total': 380000,
+      },
+    ],
+  };
+
+  final cancelled = <String, Object?>{
+    'id': 502,
+    'number': '502',
+    'status': 'cancelled',
+    'status_label': 'Đã huỷ',
+    'date_created': '2026-09-21 09:00:00',
+    'date_paid': null,
+    'payment_method': 'cod',
+    'payment_method_label': null,
+    'payment_status': 'refunded',
+    'currency': 'VND',
+    'total': 189000,
+    // Khách không nhập tên: đơn nhập tay trong wp-admin.
+    'customer': {'id': 0, 'is_guest': true, 'name': null, 'phone': null},
+    'billing': {'first_name': '', 'last_name': '', 'city': ''},
+    'shipping': {
+      'first_name': '',
+      'last_name': '',
+      'city': '',
+    },
+    'line_items': [
+      {
+        'id': 12,
+        'product_id': 102,
+        'variation_id': 0,
+        'name': 'Kem Chống Nắng',
+        'sku': null,
+        'quantity': 1,
+        'price': 189000,
+        'subtotal': 189000,
+        'total': 189000,
+      },
+    ],
+  };
+
+  // GET /orders/{id} giống phần tử của danh sách, cộng 8 trường chi tiết.
+  final detail = <String, Object?>{
+    ...listItem,
+    'wc_active': true,
+    'customer_note': 'Giao sau 18h',
+    'subtotal': 380000,
+    'discount_total': 0,
+    'shipping_total': 18000,
+    'fee_total': 0,
+    'refunded_total': 0,
+    'created_via': 'checkout',
+  };
+
+  return ([listItem, cancelled], detail);
 }
 
 ApiOrderRepository _okRepository() {
+  final (list, detail) = _orderFixtures();
   final session = _signedIn();
   return ApiOrderRepository(
     authSession: session,
@@ -85,36 +172,14 @@ ApiOrderRepository _okRepository() {
       authSession: session,
       httpClient: MockClient((request) async {
         if (request.url.path.endsWith('/501')) {
-          return _jsonResponse({
-            'wc_active': true,
-            'id': 501,
-            'number': '501',
-            'status': 'processing',
-            'status_label': 'Đang xử lý',
-            'customer_name': 'Nguyễn Thị A',
-            'customer_phone': '0900000000',
-            'created_at': '2026-09-20 14:30:00',
-            'total': 398000,
-            'payment_method_label': 'COD',
-            'notes': 'Giao sau 18h',
-            'items': [
-              {
-                'id': 11,
-                'product_id': 101,
-                'variation_id': 1001,
-                'name': 'Son Kem Lì Satin',
-                'sku': 'KC-0001-RED',
-                'quantity': 2,
-                'price': 190000,
-                'subtotal': 380000,
-              },
-            ],
-          });
+          return _jsonResponse(detail);
         }
         return _jsonResponse({
           'wc_active': true,
-          'count': 2,
-          'data': _orderFixtures(),
+          'count': list.length,
+          'page': 1,
+          'per_page': 20,
+          'data': list,
         });
       }),
     ),
@@ -198,7 +263,10 @@ void main() {
     expect(find.text('#501'), findsOneWidget);
     expect(find.text('#502'), findsOneWidget);
     expect(find.text('398.000 đ'), findsOneWidget);
-    expect(find.text('Nguyễn Thị A'), findsOneWidget);
+    // Đơn 501 là khách lẻ nên nhãn ghi rõ trạng thái tài khoản.
+    expect(find.text('Nguyễn Thị A (khách lẻ)'), findsOneWidget);
+    // itemsCount tính từ line_items vì API không có items_count.
+    expect(find.text('1 sản phẩm · COD'), findsOneWidget);
   });
 
   testWidgets('Đơn hàng thiếu tên khách dùng nhãn dự phòng', (tester) async {
@@ -206,6 +274,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Khách lẻ (chưa có tên)'), findsOneWidget);
+    // payment_method_label null nên không ghi kèm sau số sản phẩm.
+    expect(find.text('1 sản phẩm'), findsOneWidget);
   });
 
   testWidgets('Lọc theo trạng thái chỉ hiện đơn tương ứng', (tester) async {
@@ -258,15 +328,28 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('#501'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Son Kem Lì Satin'), findsOneWidget);
+    // Màn chi tiết dài hơn một màn hình nên phải cuộn tới từng phần.
+    Future<void> scrollTo(String text) async {
+      await tester.scrollUntilVisible(find.text(text), 120);
+      await tester.pumpAndSettle();
+    }
+
+    await scrollTo('Son Kem Lì Satin');
+    expect(find.text('Biến thể'), findsOneWidget);
     expect(find.text('SKU: KC-0001-RED'), findsOneWidget);
-    expect(find.text('Số lượng: 2'), findsOneWidget);
-    expect(find.text('Ghi chú'), findsOneWidget);
+    expect(find.text('Số lượng: 2 · 190.000 đ'), findsOneWidget);
+    expect(find.text('Sản phẩm (1)'), findsOneWidget);
+    // 380.000 đ xuất hiện ở dòng tiền của item và ở dòng "Tạm tính".
+    expect(find.text('380.000 đ'), findsAtLeastNWidgets(1));
+
+    await scrollTo('Ghi chú của khách');
     expect(find.text('Giao sau 18h'), findsOneWidget);
+    expect(find.text('Kênh đặt hàng'), findsOneWidget);
+    expect(find.text('Trang thanh toán'), findsOneWidget);
   });
+
 
   testWidgets('Chi tiết đơn 404 hiển thị lỗi và có nút thử lại', (
     tester,

@@ -88,6 +88,8 @@ class _OrderListScreenState extends State<OrderListScreen> {
     try {
       final orders = await _apiRepository.fetchAll(
         search: _query.trim().isEmpty ? null : _query.trim(),
+        // Lọc trạng thái do server xử lý, đúng tham số `?status=` của API.
+        status: _filter?.wire,
       );
       if (!mounted) {
         return;
@@ -119,6 +121,11 @@ class _OrderListScreenState extends State<OrderListScreen> {
     if (_authSession.isSignedIn) {
       await _reload();
     }
+  }
+
+  void _selectFilter(OrderStatus? status) {
+    setState(() => _filter = status);
+    _reload();
   }
 
   void _requireSignIn() {
@@ -204,15 +211,18 @@ class _OrderListScreenState extends State<OrderListScreen> {
                   _FilterChip(
                     label: 'Tất cả',
                     selected: _filter == null,
-                    onSelected: () => setState(() => _filter = null),
+                    onSelected: () => _selectFilter(null),
                   ),
-                  ...OrderStatus.values.map(
-                    (status) => _FilterChip(
-                      label: status.label,
-                      selected: _filter == status,
-                      onSelected: () => setState(() => _filter = status),
-                    ),
-                  ),
+                  // Bỏ `unknown`: không có slug để gửi lên API.
+                  ...OrderStatus.values
+                      .where((status) => status != OrderStatus.unknown)
+                      .map(
+                        (status) => _FilterChip(
+                          label: status.label,
+                          selected: _filter == status,
+                          onSelected: () => _selectFilter(status),
+                        ),
+                      ),
                 ],
               ),
             ),
@@ -408,8 +418,9 @@ class _OrderCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(order.customerLabel, style: theme.textTheme.bodySmall),
             Text(
+              // itemsCount tính từ line_items vì API không có items_count.
               '${order.itemsCount} sản phẩm'
-              '${order.paymentMethodLabel.isEmpty ? '' : ' · ${order.paymentMethodLabel}'}',
+              '${(order.paymentMethodLabel ?? '').isEmpty ? '' : ' · ${order.paymentMethodLabel}'}',
               style: theme.textTheme.bodySmall,
             ),
           ],

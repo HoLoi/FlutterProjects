@@ -1,11 +1,19 @@
+import '../models/api_value.dart';
 import '../models/product.dart';
 import '../services/api_client.dart';
 
 class ApiProductException implements Exception {
-  const ApiProductException(this.message, {this.wcInactive = false});
+  const ApiProductException(
+    this.message, {
+    this.wcInactive = false,
+    this.notFound = false,
+  });
 
   final String message;
   final bool wcInactive;
+
+  /// `GET /products/{id}` trả `404` khi sản phẩm không tồn tại.
+  final bool notFound;
 
   @override
   String toString() => message;
@@ -25,7 +33,22 @@ class ApiProductRepository {
         wcInactive: result.status == ProductsStatus.wcInactive,
       );
     }
-    return result.items.map(ApiProductParser.fromJson).toList();
+    return result.items.map(ApiProductParser.fromJson).toList(growable: false);
+  }
+
+  /// Chi tiết một sản phẩm (read-only).
+  Future<Product> fetchDetail(int productId) async {
+    final result = await _apiClient.fetchProductDetail(productId);
+    if (!result.succeeded) {
+      throw ApiProductException(
+        result.message ?? 'Không đọc được chi tiết sản phẩm',
+        wcInactive: result.status == ProductDetailStatus.wcInactive,
+        notFound: result.status == ProductDetailStatus.notFound,
+      );
+    }
+    return ApiProductParser.fromJson(
+      ApiValue.object(result.data) ?? const <String, dynamic>{},
+    );
   }
 }
 
@@ -33,18 +56,22 @@ class ApiProductParser {
   static const int lowStockThreshold = 5;
 
   static Product fromJson(Map<String, dynamic> json) {
-    final stockStatus = json['stock_status']?.toString() ?? 'instock';
-    final stockQuantity = (json['stock_quantity'] as num?)?.toInt();
+    final stockStatus = ApiValue.textOrEmpty(json['stock_status']);
+    // Giữ null: API trả null khi sản phẩm không bật quản lý kho.
+    final stockQuantity = ApiValue.integer(json['stock_quantity']);
 
     return Product(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      name: json['name']?.toString() ?? '',
-      sku: json['sku']?.toString() ?? '',
-      barcode: json['barcode']?.toString() ?? '',
-      price: (json['price'] as num?)?.toDouble() ?? 0,
+      id: ApiValue.integerOrZero(json['id']),
+      name: ApiValue.textOrEmpty(json['name']),
+      sku: ApiValue.textOrEmpty(json['sku']),
+      barcode: ApiValue.textOrEmpty(json['barcode']),
+      price: ApiValue.numberOrZero(json['price']),
+      regularPrice: ApiValue.number(json['regular_price']),
+      salePrice: ApiValue.number(json['sale_price']),
       stockQuantity: stockQuantity,
       status: _status(stockStatus, stockQuantity),
-      imageUrl: json['image_url']?.toString(),
+      productType: ApiValue.textOrEmpty(json['type']),
+      imageUrl: ApiValue.text(json['image_url']),
       category: _category(json['categories']),
     );
   }
@@ -60,14 +87,12 @@ class ApiProductParser {
     return ProductStatus.inStock;
   }
 
+  /// `categories` là mảng `{id, name, slug}`; lấy tên danh mục đầu tiên.
   static String? _category(Object? raw) {
-    if (raw is! List || raw.isEmpty) {
+    final categories = ApiValue.objectList(raw);
+    if (categories.isEmpty) {
       return null;
     }
-    final first = raw.first;
-    if (first is Map<String, dynamic>) {
-      return first['name']?.toString();
-    }
-    return null;
+    return ApiValue.text(categories.first['name']);
   }
 }

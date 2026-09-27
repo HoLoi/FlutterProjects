@@ -1,3 +1,4 @@
+import '../models/api_value.dart';
 import '../models/order.dart';
 import '../services/api_client.dart';
 import '../services/auth_session.dart';
@@ -8,12 +9,16 @@ class ApiOrderException implements Exception {
     this.wcInactive = false,
     this.unauthorized = false,
     this.forbidden = false,
+    this.notFound = false,
   });
 
   final String message;
   final bool wcInactive;
   final bool unauthorized;
   final bool forbidden;
+
+  /// `GET /orders/{id}` trả `404` khi đơn không tồn tại.
+  final bool notFound;
 
   @override
   String toString() => message;
@@ -26,15 +31,21 @@ class ApiOrderRepository {
   final ApiClient _apiClient;
 
   /// Danh sách đơn hàng WooCommerce (read-only, cần đăng nhập).
+  ///
+  /// [status] là slug như `processing`; [dateFrom] / [dateTo] theo `YYYY-MM-DD`.
   Future<List<Order>> fetchAll({
     String? search,
     String? status,
+    String? dateFrom,
+    String? dateTo,
     int perPage = 20,
     int page = 1,
   }) async {
     final result = await _apiClient.fetchOrders(
       search: search,
       status: status,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
       perPage: perPage,
       page: page,
     );
@@ -46,7 +57,7 @@ class ApiOrderRepository {
         forbidden: result.status == CatalogStatus.forbidden,
       );
     }
-    return result.items.map(ApiOrderParser.fromJson).toList();
+    return result.items.map(ApiOrderParser.fromJson).toList(growable: false);
   }
 
   /// Chi tiết một đơn hàng (read-only, cần đăng nhập).
@@ -58,8 +69,11 @@ class ApiOrderRepository {
         wcInactive: result.status == OrderDetailStatus.wcInactive,
         unauthorized: result.status == OrderDetailStatus.unauthorized,
         forbidden: result.status == OrderDetailStatus.forbidden,
+        notFound: result.status == OrderDetailStatus.notFound,
       );
     }
-    return ApiOrderParser.fromJson(result.data ?? const <String, dynamic>{});
+    return ApiOrderParser.fromJson(
+      ApiValue.object(result.data) ?? const <String, dynamic>{},
+    );
   }
 }
