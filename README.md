@@ -25,7 +25,8 @@ Dữ liệu WooCommerce hiện có  (nguồn dữ liệu chính)
 - ❌ **Chưa làm nhiều chi nhánh** — mô hình một cửa hàng.
 - ❌ **Chưa làm hệ thống tồn kho riêng** — dùng tồn kho WooCommerce. Bảng riêng chỉ tạo khi WooCommerce thật sự thiếu nghiệp vụ (lô, NCC, lịch sử nhập kho).
 - ❌ **Chưa làm tính năng enterprise** — không multi-warehouse, loyalty, notification phức tạp, event bus, recovery job, hàng chục custom table.
-- ❌ **Chưa được tự động ghi dữ liệu production** — MVP-10 và MVP-11 chỉ đọc (GET). Ghi dữ liệu bắt đầu từ MVP-13 kèm auth.
+- ❌ **Chưa được tự động ghi dữ liệu production** — MVP-10 → MVP-12 chỉ đọc (GET). Ghi dữ liệu bắt đầu từ MVP-13 kèm auth.
+- ❌ **Chưa lưu phiên đăng nhập lâu dài** — phiên chỉ nằm trong RAM, tắt app phải đăng nhập lại.
 
 ## Thành phần
 
@@ -36,16 +37,26 @@ Dữ liệu WooCommerce hiện có  (nguồn dữ liệu chính)
 
 ## Endpoint
 
-| Method | Đường dẫn | Mô tả |
-|---|---|---|
-| GET | `/wp-json/kc/v1/health` | Kiểm tra kết nối |
-| GET | `/wp-json/kc/v1/products` | Sản phẩm WooCommerce |
-| GET | `/wp-json/kc/v1/categories` | Danh mục sản phẩm (MVP-11) |
-| GET | `/wp-json/kc/v1/variations` | Biến thể sản phẩm (MVP-11) |
-| GET | `/wp-json/kc/v1/orders` | Đơn hàng WooCommerce (MVP-11) |
-| GET | `/wp-json/kc/v1/orders/{id}` | Chi tiết đơn hàng (MVP-11) |
+| Method | Đường dẫn | Mô tả | Xác thực |
+|---|---|---|---|
+| GET | `/wp-json/kc/v1/health` | Kiểm tra kết nối | Public |
+| GET | `/wp-json/kc/v1/products` | Sản phẩm WooCommerce | Public |
+| GET | `/wp-json/kc/v1/categories` | Danh mục sản phẩm (MVP-11) | Public |
+| GET | `/wp-json/kc/v1/variations` | Biến thể sản phẩm (MVP-11) | Public |
+| GET | `/wp-json/kc/v1/orders` | Đơn hàng WooCommerce (MVP-12) | **Bắt buộc** |
+| GET | `/wp-json/kc/v1/orders/{id}` | Chi tiết đơn hàng (MVP-12) | **Bắt buộc** |
 
-Chi tiết: [docs/03_API_SPECIFICATION.md](docs/03_API_SPECIFICATION.md)
+## Đăng nhập (MVP-12)
+
+- Dùng **WordPress Application Password** qua HTTPS:
+  `Authorization: Basic base64(username:application-password)`.
+- Lấy mật khẩu ứng dụng tại **WordPress → Hồ sơ người dùng → Application Passwords**.
+- Quyền xem đơn hàng: `manage_woocommerce`, hoặc `edit_shop_orders`, hoặc `read_private_shop_orders`.
+- `401` khi chưa xác thực, `403` khi tài khoản thiếu quyền.
+- Phiên chỉ lưu trong RAM — tắt app phải đăng nhập lại. Bỏ qua đăng nhập vẫn dùng được sản phẩm/POS, riêng tab Đơn hàng cần đăng nhập.
+- Chi tiết: [docs/05_SECURITY.md](docs/05_SECURITY.md)
+
+Chi tiết API: [docs/03_API_SPECIFICATION.md](docs/03_API_SPECIFICATION.md)
 
 ## Roadmap
 

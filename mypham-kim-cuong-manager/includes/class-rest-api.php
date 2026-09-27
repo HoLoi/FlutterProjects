@@ -94,24 +94,36 @@ class MKC_REST_API {
 					'required'          => false,
 					'sanitize_callback' => 'sanitize_text_field',
 				),
-			)
+			),
+			array( __CLASS__, 'permission_orders' )
 		);
-		self::register_read_only_route( '/orders/(?P<id>\d+)', array( __CLASS__, 'handle_order_detail' ) );
+		self::register_read_only_route(
+			'/orders/(?P<id>\d+)',
+			array( __CLASS__, 'handle_order_detail' ),
+			false,
+			array(),
+			array( __CLASS__, 'permission_orders' )
+		);
 	}
 
 	/**
 	 * Đăng ký một route GET read-only kèm tham số phân trang chuẩn.
 	 *
-	 * @param string   $path        Đường dẫn sau namespace.
-	 * @param callable $callback    Handler.
-	 * @param bool     $with_search Bật tham số search.
-	 * @param array    $extra_args  Tham số riêng của từng route.
+	 * @param string   $path             Đường dẫn sau namespace.
+	 * @param callable $callback         Handler.
+	 * @param bool     $with_search      Bật tham số search.
+	 * @param array    $extra_args       Tham số riêng của từng route.
+	 * @param callable $permission       permission_callback, mặc định cho phép public.
 	 */
-	private static function register_read_only_route( $path, $callback, $with_search = false, $extra_args = array() ) {
+	private static function register_read_only_route( $path, $callback, $with_search = false, $extra_args = array(), $permission = null ) {
+		if ( null === $permission ) {
+			$permission = array( __CLASS__, 'permission_public' );
+		}
+
 		$args = array(
 			'methods'             => 'GET',
 			'callback'            => $callback,
-			'permission_callback' => array( __CLASS__, 'permission_public' ),
+			'permission_callback' => $permission,
 			'args'                => array(
 				'per_page' => array(
 					'type'              => 'integer',
@@ -144,8 +156,10 @@ class MKC_REST_API {
 	}
 
 	/**
-	 * Read-only public access dùng cho MVP demo.
-	 * TODO: trước khi lên production phải yêu cầu xác thực (ví dụ nonce + capability).
+	 * Read-only public access cho endpoint catalog.
+	 * Chỉ dùng cho dữ liệu công khai: /health, /products, /categories, /variations.
+	 *
+	 * TODO: nếu cần bảo vệ catalog sau này thì tách riêng, không dùng hàm này cho /orders.
 	 *
 	 * @return true
 	 */
@@ -154,8 +168,62 @@ class MKC_REST_API {
 	}
 
 	/**
-	 * Read-only public access dùng cho MVP demo.
-	 * TODO: trước khi lên production phải yêu cầu xác thực (ví dụ nonce + capability).
+	 * Bảo vệ endpoint đơn hàng (MVP-12).
+	 *
+	 * Xác thực bằng WordPress Application Password qua HTTPS: app gửi
+	 * header `Authorization: Basic base64(username:application-password)`.
+	 * WordPress tự xác thực qua Application Password nên plugin chỉ cần
+	 * kiểm tra user đã đăng nhập và có capability xem đơn WooCommerce.
+	 *
+	 * - Chưa đăng nhập      → 401.
+	 * - Đã đăng nhập nhưng thiếu quyền → 403.
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function permission_orders() {
+		if ( ! is_user_logged_in() ) {
+			return new WP_Error(
+				'kc_not_authenticated',
+				'Cần đăng nhập để xem đơn hàng.',
+				array( 'status' => 401 )
+			);
+		}
+
+		if ( ! self::can_view_orders() ) {
+			return new WP_Error(
+				'kc_cannot_view_orders',
+				'Tài khoản không có quyền xem đơn hàng.',
+				array( 'status' => 403 )
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Capability tối thiểu để xem đơn WooCommerce.
+	 *
+	 * Ưu tiên `manage_woocommerce` (quản trị). Nếu website không cấp
+	 * capability này cho shop_manager thì chấp nhận hai capability
+	 * `edit_shop_orders` / `read_private_shop_orders` của WooCommerce.
+	 *
+	 * @return bool
+	 */
+	private static function can_view_orders() {
+		if ( current_user_can( 'manage_woocommerce' ) ) {
+			return true;
+		}
+
+		if ( current_user_can( 'edit_shop_orders' ) ) {
+			return true;
+		}
+
+		return current_user_can( 'read_private_shop_orders' );
+	}
+
+	/**
+	 * Endpoint catalog sản phẩm vẫn public trong phạm vi MVP-12.
+	 * Chỉ endpoint đơn hàng yêu cầu xác thực, xem permission_orders().
 	 *
 	 * @return true
 	 */

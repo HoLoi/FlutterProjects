@@ -10,6 +10,14 @@ import 'package:mypham_kim_cuong_app/models/order.dart';
 import 'package:mypham_kim_cuong_app/models/product_category.dart';
 import 'package:mypham_kim_cuong_app/models/product_variation.dart';
 import 'package:mypham_kim_cuong_app/services/api_client.dart';
+import 'package:mypham_kim_cuong_app/services/auth_session.dart';
+
+/// Session đã đăng nhập, chỉ tồn tại trong test.
+AuthSession _signedInSession() {
+  final session = AuthSession();
+  session.signIn(username: 'demo', appPassword: 'abcd efgh ijkl');
+  return session;
+}
 
 http.Response _jsonResponse(Object body, {int status = 200}) {
   return http.Response(
@@ -174,6 +182,7 @@ void main() {
   group('ApiClient.fetchOrders', () {
     test('gọi đúng path và trả về danh sách', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((request) async {
           expect(request.url.path, '/wp-json/kc/v1/orders');
           expect(request.url.queryParameters['per_page'], '20');
@@ -198,6 +207,7 @@ void main() {
       String? searchParam;
       String? statusParam;
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((request) async {
           searchParam = request.url.queryParameters['search'];
           statusParam = request.url.queryParameters['status'];
@@ -213,6 +223,7 @@ void main() {
 
     test('search rỗng thì không gửi tham số', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((request) async {
           expect(request.url.queryParameters.containsKey('search'), isFalse);
           return _jsonResponse({'wc_active': true, 'count': 0, 'data': []});
@@ -226,6 +237,7 @@ void main() {
 
     test('WooCommerce chưa active thì trả wcInactive', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async {
           return _jsonResponse({
             'wc_active': false,
@@ -245,6 +257,7 @@ void main() {
 
     test('HTTP 500 trả httpError', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async => http.Response('', 500)),
       );
 
@@ -256,6 +269,7 @@ void main() {
 
     test('lỗi mạng trả networkError', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async {
           throw http.ClientException('Connection refused');
         }),
@@ -270,6 +284,7 @@ void main() {
     test('base URL rỗng trả invalidUrl', () async {
       AppSettings.baseUrl = '';
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async => http.Response('', 500)),
       );
 
@@ -282,6 +297,7 @@ void main() {
   group('ApiClient.fetchOrderDetail', () {
     test('gọi đúng path có id và parse dữ liệu', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((request) async {
           expect(request.url.path, '/wp-json/kc/v1/orders/501');
           return _jsonResponse({
@@ -305,6 +321,7 @@ void main() {
 
     test('HTTP 404 trả notFound', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async => http.Response('', 404)),
       );
 
@@ -316,6 +333,7 @@ void main() {
 
     test('HTTP 500 trả httpError', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async => http.Response('', 500)),
       );
 
@@ -328,6 +346,7 @@ void main() {
     test('base URL rỗng trả invalidUrl', () async {
       AppSettings.baseUrl = '';
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((_) async => http.Response('', 500)),
       );
 
@@ -340,6 +359,7 @@ void main() {
   group('ApiClient.fetchCategories', () {
     test('gọi đúng path và parse danh mục', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((request) async {
           expect(request.url.path, '/wp-json/kc/v1/categories');
           return _jsonResponse({
@@ -372,6 +392,7 @@ void main() {
   group('ApiClient.fetchVariations', () {
     test('gọi đúng path kèm product_id', () async {
       final client = ApiClient(
+        authSession: _signedInSession(),
         httpClient: MockClient((request) async {
           expect(request.url.path, '/wp-json/kc/v1/variations');
           expect(request.url.queryParameters['product_id'], '101');
@@ -427,6 +448,7 @@ void main() {
     test('fetchAll trả về danh sách Order đã parse', () async {
       final repository = ApiOrderRepository(
         apiClient: ApiClient(
+          authSession: _signedInSession(),
           httpClient: MockClient((_) async {
             return _jsonResponse({
               'wc_active': true,
@@ -459,6 +481,7 @@ void main() {
     test('fetchDetail trả về Order đã parse', () async {
       final repository = ApiOrderRepository(
         apiClient: ApiClient(
+          authSession: _signedInSession(),
           httpClient: MockClient((_) async {
             return _jsonResponse({
               'wc_active': true,
@@ -484,6 +507,7 @@ void main() {
     test('ném ApiOrderException khi WooCommerce chưa active', () async {
       final repository = ApiOrderRepository(
         apiClient: ApiClient(
+          authSession: _signedInSession(),
           httpClient: MockClient((_) async {
             return _jsonResponse({
               'wc_active': false,
@@ -508,6 +532,7 @@ void main() {
     test('ném ApiOrderException khi lỗi mạng', () async {
       final repository = ApiOrderRepository(
         apiClient: ApiClient(
+          authSession: _signedInSession(),
           httpClient: MockClient((_) async {
             throw http.ClientException('Connection refused');
           }),
@@ -522,15 +547,6 @@ void main() {
               .having((e) => e.message, 'message', contains('Không kết nối')),
         ),
       );
-    });
-  });
-
-  group('MockOrderRepository', () {
-    test('trả về đơn hàng mẫu để dùng khi chưa bật API', () {
-      final orders = const MockOrderRepository().getOrders();
-
-      expect(orders.length, 1);
-      expect(orders.single.status, OrderStatus.processing);
     });
   });
 }

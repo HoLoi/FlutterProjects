@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../data/product_repository.dart';
 import '../models/app_settings.dart';
 import '../models/product.dart';
+import '../services/auth_session.dart';
 import '../services/cart_controller.dart';
 import '../services/dashboard_summary.dart';
 import '../services/stock_receiving_controller.dart';
+import 'login_screen.dart';
 import 'pos_screen.dart';
 import 'order_list_screen.dart';
 import 'product_list_screen.dart';
@@ -18,11 +20,13 @@ class DashboardScreen extends StatefulWidget {
     this.repository,
     this.cart,
     this.stockController,
+    this.authSession,
   });
 
   final ProductRepository? repository;
   final CartController? cart;
   final StockReceivingController? stockController;
+  final AuthSession? authSession;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -34,6 +38,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late final ProductRepository _repository;
   late final CartController _cart;
   late final StockReceivingController _stockController;
+  late final AuthSession _authSession;
 
   bool get _ownsCart => widget.cart == null;
   bool get _ownsStock => widget.stockController == null;
@@ -44,6 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _repository = widget.repository ?? MockProductRepository();
     _cart = widget.cart ?? CartController();
     _stockController = widget.stockController ?? StockReceivingController();
+    _authSession = widget.authSession ?? AuthSession();
     _screens = <Widget>[
       _DashboardHomePage(
         products: _repository.getProducts(),
@@ -51,7 +57,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         stock: _stockController,
       ),
       ProductListScreen(repository: _repository),
-      OrderListScreen(),
+      OrderListScreen(authSession: _authSession, onRequireSignIn: _openLogin),
       PosScreen(repository: _repository, cart: _cart),
       StockReceivingScreen(controller: _stockController),
     ];
@@ -69,9 +75,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openSettings() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  }
+
+  void _openLogin() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+      MaterialPageRoute<void>(
+        builder: (_) => LoginScreen(authSession: _authSession),
+      ),
     );
+  }
+
+  void _signOut() {
+    _authSession.signOut();
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Đã đăng xuất')));
   }
 
   @override
@@ -80,6 +99,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('Mỹ Phẩm Kim Cương'),
         actions: [
+          ListenableBuilder(
+            listenable: _authSession,
+            builder: (context, _) {
+              if (!_authSession.isSignedIn) {
+                return const SizedBox.shrink();
+              }
+              return IconButton(
+                icon: const Icon(Icons.logout),
+                tooltip: 'Đăng xuất',
+                onPressed: _signOut,
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Cài đặt',
@@ -245,8 +277,9 @@ class _DashboardHomePage extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               'Cảnh báo nhanh',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             if (!summary.apiConnected) ...[
@@ -299,8 +332,9 @@ class _DashboardHomePage extends StatelessWidget {
                         ),
                         Text(
                           '${summary.inStock}/${summary.totalProducts}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.primary),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                          ),
                         ),
                       ],
                     ),
@@ -384,10 +418,7 @@ class _WarningTile extends StatelessWidget {
       margin: EdgeInsets.zero,
       child: ListTile(
         leading: Icon(icon, color: color),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle),
         onTap: onTap,
         trailing: onTap != null ? const Icon(Icons.chevron_right) : null,

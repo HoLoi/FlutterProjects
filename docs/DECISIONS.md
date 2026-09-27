@@ -26,13 +26,32 @@ Chỉ tạo bảng `wp_kc_*` khi WooCommerce thật sự không có nghiệp v�
 WooCommerce dùng HPOS, đơn nằm ở `wp_wc_orders`.
 **Lý do:** SQL tay vào bảng đơn hàng sẽ hỏng khi HPOS đổi cấu trúc.
 
-## D-07 — Giai đoạn hiện tại chỉ dùng GET 🔶
-MVP-10 và MVP-11 chỉ đọc. Ghi dữ liệu bắt đầu từ MVP-13, kèm auth + idempotency.
-**Lý do:** không có auth thì không được ghi production.
+## D-07 — Giai đoạn hiện tại chỉ dùng GET ✅
+MVP-10 → MVP-12 chỉ đọc. Ghi dữ liệu bắt đầu từ MVP-13, kèm auth + idempotency.
+**Lý do:** phạm vi MVP nhỏ, dễ kiểm chứng; chưa cần ghi thì chưa ghi.
 
-## D-08 — Endpoint đọc tạm thời public 🔶
-Chấp nhận rủi ro đọc dữ liệu công khai trong giai đoạn thử nghiệm; đóng lại ở MVP-12.
+## D-08 — Endpoint đọc tạm thời public ✅ (đã đóng cho đơn hàng ở MVP-12)
+Chấp nhận rủi ro đọc dữ liệu công khai trong giai đoạn thử nghiệm; **đơn hàng đã
+đóng lại ở MVP-12**, chỉ còn catalog public.
 **Lý do:** giữ MVP đơn giản, không làm auth sớm khi chưa cần.
+
+## D-08b — Dùng WordPress Application Password, không tự viết cơ chế auth ✅
+App gửi `Authorization: Basic base64(username:application-password)` qua HTTPS;
+WordPress tự xác thực, plugin chỉ kiểm tra `is_user_logged_in()` + capability.
+Không có `POST /auth/login`, không có token/refresh token, không có bảng user riêng.
+Phân quyền: `manage_woocommerce` → fallback `edit_shop_orders` → fallback `read_private_shop_orders`.
+**Lý do:** dùng cơ chế có sẵn, đã được WordPress bảo trì, không tự lưu mật khẩu hash
+hay token trong database; giảm bề mặt lỗi so với tự xây auth.
+**Đánh đổi:** cần HTTPS tuyệt đối; app phải gửi mật khẩu mỗi request nên không có
+cơ chế thu hồi token tức thời — đổi lại mỗi tài khoản có thể tự tạo/thu hồi
+Application Password ngay trong WordPress.
+
+## D-08c — Phiên đăng nhập chỉ nằm trong RAM ✅
+`AuthSession extends ChangeNotifier`, không lưu xuống SharedPreferences hay file.
+Không có getter mật khẩu, `toString()` không chứa username/mật khẩu/header.
+Xác minh đăng nhập bằng `GET /orders?per_page=1&page=1` (read-only).
+**Lý do:** MVP-12 không cần phiên sống dai; tránh phát sinh secret trên đĩa.
+**Đánh đổi:** tắt app là phải đăng nhập lại. Chấp nhận được ở phạm vi hiện tại.
 
 ## D-09 — Không đưa secret vào APK ✅
 WooCommerce consumer key/secret và mật khẩu WP chỉ nằm ở server.

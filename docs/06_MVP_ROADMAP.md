@@ -17,10 +17,16 @@ Mỗi MVP chỉ làm **đúng phạm vi** của MVP đó. Không tự động nh
 - [x] Flutter hiển thị danh sách và chi tiết đơn hàng
 - **Chỉ đọc, không sửa dữ liệu.** Không tạo bảng mới. POS vẫn giữ mock.
 
-## MVP-12 ⏳ Auth
-- [ ] Đăng nhập và authentication tối thiểu
-- [ ] Phân quyền admin, manager, staff
-- [ ] Không lưu secret WooCommerce trong APK
+## MVP-12 ✅ Đã hoàn tất — Auth tối thiểu
+- [x] Xác thực bằng WordPress Application Password qua HTTPS (không tự viết cơ chế auth)
+- [x] Bảo vệ `GET /orders` và `GET /orders/{id}`; catalog vẫn public
+- [x] `401` khi chưa xác thực, `403` khi thiếu capability xem đơn
+- [x] Phân quyền: `manage_woocommerce` → fallback `edit_shop_orders` → `read_private_shop_orders`
+- [x] Màn hình đăng nhập + đăng xuất trong Flutter
+- [x] Phiên chỉ lưu trong RAM, không ghi secret xuống đĩa, không thêm package
+- [x] Không lưu secret WooCommerce trong APK
+- **Chỉ đọc.** Không thêm endpoint ghi, không tạo bảng mới, POS vẫn giữ mock.
+- Chưa xác minh được trên production (không có môi trường PHP/WordPress local, không dùng secret thật).
 
 ## MVP-13 ⏳ POS thật
 - [ ] Flutter gửi sản phẩm và số lượng lên plugin

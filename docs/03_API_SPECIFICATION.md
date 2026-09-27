@@ -8,7 +8,10 @@ Tất cả endpoint thuộc namespace `kc/v1` của plugin `mypham-kim-cuong-man
 Base URL: https://{host}/wp-json/kc/v1
 ```
 
-Giai đoạn hiện tại (MVP-10, MVP-11) **chỉ dùng GET** — read-only.
+Giai đoạn hiện tại (MVP-10 → MVP-12) **chỉ dùng GET** — read-only.
+
+Từ MVP-12, endpoint đơn hàng (`/orders`, `/orders/{id}`) **yêu cầu xác thực**;
+endpoint catalog vẫn public. Chi tiết ở mục 6.
 
 ## 2. Quy ước chung
 
@@ -81,7 +84,10 @@ Danh sách sản phẩm WooCommerce. Tham số: `search`, `page`, `per_page`.
 
 Lưu ý: `stock_quantity` có thể là `null` khi WooCommerce không quản lý tồn kho cho sản phẩm đó.
 
-## 4. Endpoint MVP-11 (chỉ đọc)
+## 4. Endpoint MVP-11/MVP-12 (chỉ đọc)
+
+`/categories`, `/variations` còn public. `/orders`, `/orders/{id}` yêu cầu
+xác thực từ MVP-12 (mục 6).
 
 ### GET `/categories`
 Danh sách danh mục sản phẩm, sắp xếp theo tên. Tham số: `search`, `page`, `per_page`.
@@ -130,9 +136,11 @@ Endpoint trả về **toàn bộ** biến thể của sản phẩm nên `page` l
 
 `stock_quantity` có thể là `null`. `image_url` lấy ảnh biến thể, nếu không có thì lấy ảnh sản phẩm cha.
 
-### GET `/orders`
+### GET `/orders` — **yêu cầu xác thực**
 Danh sách đơn hàng WooCommerce (HPOS-safe, đọc bằng `wc_get_orders()`), mới nhất trước.
 Tham số: `page`, `per_page`, `status`, `search`, `date_from`, `date_to`.
+
+Trả `401` nếu chưa xác thực, `403` nếu tài khoản thiếu quyền xem đơn.
 
 `status`: `any` hoặc bỏ trống (mặc định), `pending`, `processing`, `on-hold`, `completed`, `cancelled`, `refunded`, `failed`.
 
@@ -163,8 +171,9 @@ Tham số: `page`, `per_page`, `status`, `search`, `date_from`, `date_to`.
 
 Nhãn tiếng Việt của `status` do plugin trả sẵn trong `status_label`. `payment_status` là `paid` khi đơn đã ghi nhận thời điểm thanh toán, ngược lại `unpaid`.
 
-### GET `/orders/{id}`
+### GET `/orders/{id}` — **yêu cầu xác thực**
 Chi tiết một đơn hàng. Trả `404` với mã lỗi `kc_not_found` nếu không tồn tại.
+Trả `401`/`403` theo cùng quy tắc của `/orders`.
 
 Ngoài các trường của `/orders`, response có thêm `subtotal`, `discount_total`, `shipping_total`, `notes` và danh sách `items`.
 
@@ -207,16 +216,47 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 
 | Đường dẫn | MVP | Ghi chú |
 |---|---|---|
-| `POST /auth/login` | MVP-12 | Auth tối thiểu |
 | `POST /pos/sales` | MVP-13 | Tạo WooCommerce order, có `Idempotency-Key` |
 | `GET /inventory/receivings` | MVP-14 | Nhập kho |
 | `POST /returns` | MVP-15 | Trả hàng |
 
+> MVP-12 **không** thêm endpoint `POST /auth/login`. Xác thực dùng sẵn cơ chế
+> Application Password của WordPress, xem mục 6.
+
 ## 6. Quy tắc bảo mật API
 
-- Giai đoạn thử nghiệm (MVP-10, MVP-11): endpoint đọc **public** — chấp nhận được tạm thời.
-- **Trước khi tạo/sửa/xóa dữ liệu thật** (bắt đầu MVP-13) phải bổ sung authentication + permission tối thiểu.
-- Không bao giờ trả secret qua API cho app.
+### 6.1. Phân quyền theo endpoint (từ MVP-12)
+
+| Endpoint | Xác thực | Mức quyền |
+|---|---|---|
+| `GET /health` | Public | Không |
+| `GET /products` | Public | Không |
+| `GET /categories` | Public | Không |
+| `GET /variations` | Public | Không |
+| `GET /orders` | **Bắt buộc** | Xem đơn hàng |
+| `GET /orders/{id}` | **Bắt buộc** | Xem đơn hàng |
+
+"Xem đơn hàng" = `manage_woocommerce`, hoặc `edit_shop_orders`, hoặc
+`read_private_shop_orders` (theo thứ tự ưu tiên).
+
+Mã lỗi trả về:
+
+| Tình huống | HTTP | Body |
+|---|---|---|
+| Chưa xác thực (thiếu/sai Application Password) | `401` | `{"code":"kc_not_authenticated","message":"Cần đăng nhập để xem đơn hàng."}` |
+| Đã xác thực nhưng thiếu capability | `403` | `{"code":"kc_cannot_view_orders","message":"Tài khoản không có quyền xem đơn hàng."}` |
+
+### 6.2. Cách xác thực
+
+- HTTP Basic theo chuẩn **WordPress Application Password**:
+  `Authorization: Basic base64(username:application-password)`.
+- Bắt buộc truyền qua **HTTPS**. Không dùng HTTP vì Basic header gửi thẳng
+  username + mật khẩu (chỉ base64, không mã hoá).
+- WordPress tự xác thực và dựng `current_user`; plugin chỉ kiểm tra
+  `is_user_logged_in()` và capability, không tự parse header.
+- Không có endpoint trả secret, token hay mật khẩu về app.
+- Vẫn đang **chỉ đọc** (GET). Trước khi ghi dữ liệu thật (bắt đầu MVP-13)
+  phải bổ sung chống ghi trùng (idempotency) và kiểm tra quyền ghi.
 - Xem [05_SECURITY](05_SECURITY.md).
 
 ## 7. Tài liệu liên quan

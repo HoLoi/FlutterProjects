@@ -3,60 +3,87 @@ import 'package:flutter/material.dart';
 import '../data/api_order_repository.dart';
 import '../models/order.dart';
 import '../models/product.dart';
+import '../services/api_client.dart';
+import '../services/auth_session.dart';
 import 'order_detail_screen.dart';
 
 class OrderListScreen extends StatefulWidget {
-  const OrderListScreen({super.key, this.apiRepository});
+  const OrderListScreen({
+    super.key,
+    this.apiRepository,
+    this.authSession,
+    this.onRequireSignIn,
+  });
 
   final ApiOrderRepository? apiRepository;
+  final AuthSession? authSession;
+  final VoidCallback? onRequireSignIn;
 
   @override
   State<OrderListScreen> createState() => _OrderListScreenState();
 }
 
 class _OrderListScreenState extends State<OrderListScreen> {
+  late final AuthSession _authSession;
   late final ApiOrderRepository _apiRepository;
-  late final List<Order> _mockOrders;
   List<Order> _orders = const [];
-  String? _apiError;
-  bool _apiMode = false;
-  bool _apiLoading = false;
+  String? _error;
+  bool _authError = false;
+  bool _loading = false;
   String _query = '';
   OrderStatus? _filter;
 
   @override
   void initState() {
     super.initState();
-    _apiRepository = widget.apiRepository ?? ApiOrderRepository();
-    _mockOrders = const MockOrderRepository().getOrders();
+    _authSession = widget.authSession ?? AuthSession();
+    _apiRepository =
+        widget.apiRepository ??
+        ApiOrderRepository(authSession: widget.authSession);
+    _authSession.addListener(_onAuthChanged);
+    if (_authSession.isSignedIn) {
+      _reload();
+    }
   }
 
-  List<Order> get _dataOrders => _apiMode ? _orders : _mockOrders;
+  @override
+  void dispose() {
+    _authSession.removeListener(_onAuthChanged);
+    super.dispose();
+  }
+
+  void _onAuthChanged() {
+    if (!mounted) {
+      return;
+    }
+    if (_authSession.isSignedIn) {
+      _reload();
+      return;
+    }
+    setState(() {
+      _orders = const [];
+      _error = null;
+      _authError = false;
+      _loading = false;
+    });
+  }
 
   List<Order> get _filteredOrders {
-    final list = _dataOrders;
+    final list = _orders;
     if (_filter == null) {
       return list;
     }
     return list.where((order) => order.status == _filter).toList();
   }
 
-  Future<void> _toggleApiMode(bool on) async {
-    setState(() {
-      _apiMode = on;
-      _apiError = null;
-      _query = '';
-      _filter = null;
-    });
-    if (on) {
-      await _reloadApi();
+  Future<void> _reload() async {
+    if (!_authSession.isSignedIn) {
+      return;
     }
-  }
-
-  Future<void> _reloadApi() async {
     setState(() {
-      _apiLoading = true;
-      _apiError = null;
+      _loading = true;
+      _error = null;
+      _authError = false;
     });
     try {
       final orders = await _apiRepository.fetchAll(
@@ -67,7 +94,7 @@ class _OrderListScreenState extends State<OrderListScreen> {
       }
       setState(() {
         _orders = orders;
-        _apiLoading = false;
+        _loading = false;
       });
     } on ApiOrderException catch (error) {
       if (!mounted) {
@@ -75,8 +102,9 @@ class _OrderListScreenState extends State<OrderListScreen> {
       }
       setState(() {
         _orders = const [];
-        _apiError = error.message;
-        _apiLoading = false;
+        _error = error.message;
+        _authError = error.unauthorized || error.forbidden;
+        _loading = false;
       });
     }
   }
@@ -84,26 +112,31 @@ class _OrderListScreenState extends State<OrderListScreen> {
   Future<void> _openDetail(Order order) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => OrderDetailScreen(
-          orderId: order.id,
-          apiRepository: _apiRepository,
-        ),
+        builder: (_) =>
+            OrderDetailScreen(orderId: order.id, apiRepository: _apiRepository),
       ),
     );
-    if (_apiMode) {
-      await _reloadApi();
+    if (_authSession.isSignedIn) {
+      await _reload();
     }
   }
 
+  void _requireSignIn() {
+    if (widget.onRequireSignIn != null) {
+      widget.onRequireSignIn!();
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(AuthErrorMessages.notSignedIn)),
+    );
+  }
+
   String get _countLabel {
-    if (!_apiMode) {
-      return '${_mockOrders.length} đơn hàng';
+    if (!_authSession.isSignedIn) {
+      return 'Cần đăng nhập';
     }
-    if (_apiLoading) {
+    if (_loading) {
       return 'Đang tải...';
-    }
-    if (_apiError != null) {
-      return 'Lỗi';
     }
     return '${_orders.length} đơn hàng';
   }
@@ -125,33 +158,37 @@ class _OrderListScreenState extends State<OrderListScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Card(
-            margin: EdgeInsets.zero,
-            child: SwitchListTile(
-              dense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-              title: const Text('Dùng dữ liệu API thử nghiệm'),
-              subtitle: Text(
-                _apiMode
-                    ? 'Đang đọc đơn hàng thật từ WooCommerce (read-only)'
-                    : 'App sẽ gọi REST read-only tại website để lấy đơn hàng thật.',
-                style: theme.textTheme.bodySmall,
+          if (_authSession.isSignedIn)
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                dense: true,
+                leading: const Icon(Icons.verified_user_outlined),
+                title: Text(
+                  _authSession.username,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  'Đang đọc đơn hàng thật từ WooCommerce (read-only)',
+                ),
+                trailing: IconButton(
+                  tooltip: 'Tải lại',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loading ? null : _reload,
+                ),
               ),
-              value: _apiMode,
-              onChanged: _toggleApiMode,
             ),
-          ),
-          const SizedBox(height: 12),
-          if (_apiMode && _apiLoading)
-            const Expanded(
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_apiMode && _apiError != null)
-            _apiErrorState(theme)
+          if (_authSession.isSignedIn) const SizedBox(height: 12),
+          if (!_authSession.isSignedIn)
+            Expanded(child: _signInRequired(theme))
+          else if (_loading)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else if (_error != null)
+            Expanded(child: _errorState(theme))
           else ...[
             TextField(
               onChanged: (value) => setState(() => _query = value),
+              onSubmitted: (_) => _reload(),
               decoration: const InputDecoration(
                 hintText: 'Tìm theo tên khách hoặc số đơn',
                 prefixIcon: Icon(Icons.search),
@@ -201,46 +238,92 @@ class _OrderListScreenState extends State<OrderListScreen> {
     );
   }
 
-  Widget _apiErrorState(ThemeData theme) {
-    return Expanded(
-      child: Center(
-        child: Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.cloud_off,
-                    size: 40, color: theme.colorScheme.error),
-                const SizedBox(height: 12),
-                const Text(
-                  'Không đọc được đơn hàng',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _apiError ?? 'Lỗi không xác định',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  children: [
+  Widget _signInRequired(ThemeData theme) {
+    return Center(
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                size: 40,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                AuthErrorMessages.notSignedIn,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Đơn hàng cần đăng nhập bằng tài khoản WordPress để bảo vệ dữ liệu.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: _requireSignIn,
+                icon: const Icon(Icons.login),
+                label: const Text('Đăng nhập'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _errorState(ThemeData theme) {
+    return Center(
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _authError ? Icons.lock_outline : Icons.cloud_off,
+                size: 40,
+                color: theme.colorScheme.error,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Không đọc được đơn hàng',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _error ?? 'Lỗi không xác định',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (_authError)
                     FilledButton.tonalIcon(
-                      onPressed: _reloadApi,
+                      onPressed: _requireSignIn,
+                      icon: const Icon(Icons.login),
+                      label: const Text('Đăng nhập lại'),
+                    )
+                  else
+                    FilledButton.tonalIcon(
+                      onPressed: _reload,
                       icon: const Icon(Icons.refresh),
                       label: const Text('Thử lại'),
                     ),
-                    OutlinedButton(
-                      onPressed: () => _toggleApiMode(false),
-                      child: const Text('Quay lại dữ liệu mock'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                  OutlinedButton(
+                    onPressed: _reload,
+                    child: const Text('Tải lại'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -252,8 +335,11 @@ class _OrderListScreenState extends State<OrderListScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.receipt_long_outlined,
-              size: 48, color: theme.colorScheme.outline),
+          Icon(
+            Icons.receipt_long_outlined,
+            size: 48,
+            color: theme.colorScheme.outline,
+          ),
           const SizedBox(height: 12),
           const Text('Chưa có đơn hàng'),
           const SizedBox(height: 4),
@@ -309,8 +395,9 @@ class _OrderCard extends StatelessWidget {
           children: [
             Text(
               '#${order.number}',
-              style: theme.textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             _statusBadge(theme, order.status),
           ],
@@ -340,12 +427,24 @@ class _OrderCard extends StatelessWidget {
 
   Widget _statusBadge(ThemeData theme, OrderStatus status) {
     final (background, foreground) = switch (status) {
-      OrderStatus.completed => (const Color(0xFFE8F5E9), const Color(0xFF2E7D32)),
-      OrderStatus.processing => (const Color(0xFFE3F2FD), const Color(0xFF1565C0)),
+      OrderStatus.completed => (
+        const Color(0xFFE8F5E9),
+        const Color(0xFF2E7D32),
+      ),
+      OrderStatus.processing => (
+        const Color(0xFFE3F2FD),
+        const Color(0xFF1565C0),
+      ),
       OrderStatus.pending => (const Color(0xFFFFF3E0), const Color(0xFFEF6C00)),
       OrderStatus.onHold => (const Color(0xFFFFF8E1), const Color(0xFFF9A825)),
-      OrderStatus.cancelled => (const Color(0xFFFFEBEE), const Color(0xFFC62828)),
-      OrderStatus.refunded => (const Color(0xFFECEFF1), const Color(0xFF546E7A)),
+      OrderStatus.cancelled => (
+        const Color(0xFFFFEBEE),
+        const Color(0xFFC62828),
+      ),
+      OrderStatus.refunded => (
+        const Color(0xFFECEFF1),
+        const Color(0xFF546E7A),
+      ),
       OrderStatus.failed => (const Color(0xFFFFEBEE), const Color(0xFFC62828)),
       OrderStatus.unknown => (const Color(0xFFECEFF1), const Color(0xFF546E7A)),
     };

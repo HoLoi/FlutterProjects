@@ -10,10 +10,23 @@ import 'package:mypham_kim_cuong_app/models/app_settings.dart';
 import 'package:mypham_kim_cuong_app/screens/order_detail_screen.dart';
 import 'package:mypham_kim_cuong_app/screens/order_list_screen.dart';
 import 'package:mypham_kim_cuong_app/services/api_client.dart';
+import 'package:mypham_kim_cuong_app/services/auth_session.dart';
 
-Widget _listApp(ApiOrderRepository repository) {
+const String _appPassword = 'abcd efgh ijkl mnop';
+
+Widget _listApp(
+  ApiOrderRepository repository,
+  AuthSession session, {
+  VoidCallback? onRequireSignIn,
+}) {
   return MaterialApp(
-    home: Scaffold(body: OrderListScreen(apiRepository: repository)),
+    home: Scaffold(
+      body: OrderListScreen(
+        apiRepository: repository,
+        authSession: session,
+        onRequireSignIn: onRequireSignIn,
+      ),
+    ),
   );
 }
 
@@ -29,6 +42,12 @@ http.Response _jsonResponse(Object body, {int status = 200}) {
     status,
     headers: {'content-type': 'application/json'},
   );
+}
+
+AuthSession _signedIn() {
+  final session = AuthSession();
+  session.signIn(username: 'demo', appPassword: _appPassword);
+  return session;
 }
 
 List<Map<String, dynamic>> _orderFixtures() {
@@ -59,8 +78,11 @@ List<Map<String, dynamic>> _orderFixtures() {
 }
 
 ApiOrderRepository _okRepository() {
+  final session = _signedIn();
   return ApiOrderRepository(
+    authSession: session,
     apiClient: ApiClient(
+      authSession: session,
       httpClient: MockClient((request) async {
         if (request.url.path.endsWith('/501')) {
           return _jsonResponse({
@@ -99,35 +121,26 @@ ApiOrderRepository _okRepository() {
   );
 }
 
-ApiOrderRepository _wcInactiveRepository() {
+ApiOrderRepository _repositoryReturning(int status, {String body = ''}) {
+  final session = _signedIn();
   return ApiOrderRepository(
+    authSession: session,
     apiClient: ApiClient(
-      httpClient: MockClient((_) async {
-        return _jsonResponse({
-          'wc_active': false,
-          'count': 0,
-          'data': [],
-          'message': 'WooCommerce chưa active, không đọc được dữ liệu.',
-        });
-      }),
+      authSession: session,
+      httpClient: MockClient((_) async => http.Response(body, status)),
     ),
   );
 }
 
 ApiOrderRepository _failingRepository() {
+  final session = _signedIn();
   return ApiOrderRepository(
+    authSession: session,
     apiClient: ApiClient(
+      authSession: session,
       httpClient: MockClient((_) async {
         throw http.ClientException('Connection refused');
       }),
-    ),
-  );
-}
-
-ApiOrderRepository _notFoundRepository() {
-  return ApiOrderRepository(
-    apiClient: ApiClient(
-      httpClient: MockClient((_) async => http.Response('', 404)),
     ),
   );
 }
@@ -137,45 +150,67 @@ void main() {
     AppSettings.baseUrl = 'https://demo.local';
   });
 
-  testWidgets('Mặc định hiển thị dữ liệu mock', (tester) async {
-    await tester.pumpWidget(_listApp(_okRepository()));
+  testWidgets('Chưa đăng nhập thì không gọi API và yêu cầu đăng nhập', (
+    tester,
+  ) async {
+    var called = false;
+    final session = AuthSession();
+    final repository = ApiOrderRepository(
+      authSession: session,
+      apiClient: ApiClient(
+        authSession: session,
+        httpClient: MockClient((_) async {
+          called = true;
+          return _jsonResponse({'wc_active': true, 'count': 0, 'data': []});
+        }),
+      ),
+    );
+    var askedToSignIn = false;
 
-    expect(find.text('1 đơn hàng'), findsOneWidget);
-    expect(find.text('#501'), findsOneWidget);
-    expect(find.text('Nguyễn Thị A'), findsOneWidget);
+    await tester.pumpWidget(
+      _listApp(
+        repository,
+        session,
+        onRequireSignIn: () => askedToSignIn = true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      called,
+      isFalse,
+      reason: 'không được gọi API orders trước khi đăng nhập',
+    );
+    expect(find.text('Bạn cần đăng nhập để xem đơn hàng'), findsOneWidget);
+    expect(find.text('Cần đăng nhập'), findsOneWidget);
+
+    await tester.tap(find.text('Đăng nhập'));
+    await tester.pump();
+
+    expect(askedToSignIn, isTrue);
   });
 
-  testWidgets('Bật API mode hiển thị đơn hàng từ API', (tester) async {
-    await tester.pumpWidget(_listApp(_okRepository()));
-
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+  testWidgets('Đã đăng nhập thì tải và hiển thị đơn hàng', (tester) async {
+    await tester.pumpWidget(_listApp(_okRepository(), _signedIn()));
+    await tester.pumpAndSettle();
 
     expect(find.text('2 đơn hàng'), findsOneWidget);
     expect(find.text('#501'), findsOneWidget);
     expect(find.text('#502'), findsOneWidget);
     expect(find.text('398.000 đ'), findsOneWidget);
-    expect(find.text('Đang xử lý'), findsWidgets);
-    expect(find.text('Đã huỷ'), findsWidgets);
+    expect(find.text('Nguyễn Thị A'), findsOneWidget);
   });
 
   testWidgets('Đơn hàng thiếu tên khách dùng nhãn dự phòng', (tester) async {
-    await tester.pumpWidget(_listApp(_okRepository()));
-
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(_listApp(_okRepository(), _signedIn()));
+    await tester.pumpAndSettle();
 
     expect(find.text('Khách lẻ (chưa có tên)'), findsOneWidget);
   });
 
   testWidgets('Lọc theo trạng thái chỉ hiện đơn tương ứng', (tester) async {
-    await tester.pumpWidget(_listApp(_okRepository()));
-
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(_listApp(_okRepository(), _signedIn()));
+    await tester.pumpAndSettle();
 
     final cancelledChip = find.widgetWithText(FilterChip, 'Đã huỷ');
     await tester.ensureVisible(cancelledChip);
@@ -187,42 +222,40 @@ void main() {
     expect(find.text('#501'), findsNothing);
   });
 
-  testWidgets('Lỗi API hiển thị thông báo và quay lại mock được', (tester) async {
-    await tester.pumpWidget(_listApp(_failingRepository()));
+  testWidgets('HTTP 401 hiển thị thông báo đăng nhập không hợp lệ', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_listApp(_repositoryReturning(401), _signedIn()));
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Không đọc được đơn hàng'), findsOneWidget);
+    expect(
+      find.text('Thông tin đăng nhập không hợp lệ hoặc đã hết hạn'),
+      findsOneWidget,
+    );
+    expect(find.text('Đăng nhập lại'), findsOneWidget);
+  });
+
+  testWidgets('HTTP 403 hiển thị thông báo thiếu quyền', (tester) async {
+    await tester.pumpWidget(_listApp(_repositoryReturning(403), _signedIn()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tài khoản không có quyền xem đơn hàng'), findsOneWidget);
+    expect(find.text('Đăng nhập lại'), findsOneWidget);
+  });
+
+  testWidgets('Lỗi mạng hiển thị thông báo kết nối', (tester) async {
+    await tester.pumpWidget(_listApp(_failingRepository(), _signedIn()));
+    await tester.pumpAndSettle();
 
     expect(find.text('Không đọc được đơn hàng'), findsOneWidget);
     expect(find.text('Không kết nối được máy chủ'), findsOneWidget);
     expect(find.text('Thử lại'), findsOneWidget);
-
-    await tester.tap(find.text('Quay lại dữ liệu mock'));
-    await tester.pump();
-
-    expect(find.text('1 đơn hàng'), findsOneWidget);
-  });
-
-  testWidgets('WooCommerce chưa active hiển thị lỗi rõ ràng', (tester) async {
-    await tester.pumpWidget(_listApp(_wcInactiveRepository()));
-
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    expect(
-      find.text('WooCommerce chưa active, không đọc được dữ liệu.'),
-      findsOneWidget,
-    );
   });
 
   testWidgets('Mở chi tiết đơn hàng từ danh sách', (tester) async {
-    await tester.pumpWidget(_listApp(_okRepository()));
-
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(_listApp(_okRepository(), _signedIn()));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('#501'));
     await tester.pump();
@@ -235,15 +268,58 @@ void main() {
     expect(find.text('Giao sau 18h'), findsOneWidget);
   });
 
-  testWidgets('Chi tiết đơn không tìm thấy hiển thị lỗi và có nút thử lại',
-      (tester) async {
-    await tester.pumpWidget(_detailApp(_notFoundRepository(), 999));
-
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+  testWidgets('Chi tiết đơn 404 hiển thị lỗi và có nút thử lại', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_detailApp(_repositoryReturning(404), 999));
+    await tester.pumpAndSettle();
 
     expect(find.text('Không tìm thấy đơn hàng'), findsOneWidget);
     expect(find.text('Thử lại'), findsOneWidget);
     expect(find.text('Quay lại'), findsOneWidget);
+  });
+
+  testWidgets('Chi tiết đơn 401 hiển thị thông báo đăng nhập', (tester) async {
+    await tester.pumpWidget(_detailApp(_repositoryReturning(401), 501));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Thông tin đăng nhập không hợp lệ hoặc đã hết hạn'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Chi tiết đơn 403 hiển thị thông báo thiếu quyền', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_detailApp(_repositoryReturning(403), 501));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tài khoản không có quyền xem đơn hàng'), findsOneWidget);
+  });
+
+  testWidgets('Mật khẩu không xuất hiện trên giao diện', (tester) async {
+    await tester.pumpWidget(_listApp(_okRepository(), _signedIn()));
+    await tester.pumpAndSettle();
+
+    expect(find.text(_appPassword), findsNothing);
+    expect(find.textContaining(_appPassword), findsNothing);
+  });
+
+  testWidgets('Đăng xuất thì quay về màn hình yêu cầu đăng nhập', (
+    tester,
+  ) async {
+    final session = _signedIn();
+    final repository = _okRepository();
+
+    await tester.pumpWidget(_listApp(repository, session));
+    await tester.pumpAndSettle();
+    expect(find.text('#501'), findsOneWidget);
+
+    session.signOut();
+    await tester.pumpAndSettle();
+
+    expect(find.text('#501'), findsNothing);
+    expect(find.text('Bạn cần đăng nhập để xem đơn hàng'), findsOneWidget);
   });
 }
