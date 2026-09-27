@@ -7,6 +7,7 @@ import '../services/cart_controller.dart';
 import '../services/dashboard_summary.dart';
 import '../services/stock_receiving_controller.dart';
 import 'pos_screen.dart';
+import 'order_list_screen.dart';
 import 'product_list_screen.dart';
 import 'settings_screen.dart';
 import 'stock_receiving_screen.dart';
@@ -50,6 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         stock: _stockController,
       ),
       ProductListScreen(repository: _repository),
+      OrderListScreen(),
       PosScreen(repository: _repository, cart: _cart),
       StockReceivingScreen(controller: _stockController),
     ];
@@ -103,6 +105,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icon(Icons.inventory_2_outlined),
             selectedIcon: Icon(Icons.inventory_2),
             label: 'Sản phẩm',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: 'Đơn hàng',
           ),
           NavigationDestination(
             icon: Icon(Icons.point_of_sale_outlined),
