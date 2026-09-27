@@ -157,9 +157,17 @@ class _ProductListScreenState extends State<ProductListScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Danh sách sản phẩm', style: theme.textTheme.titleLarge),
+              // Tiêu đề co lại được để không tràn trên màn hình hẹp.
+              Expanded(
+                child: Text(
+                  'Danh sách sản phẩm',
+                  style: theme.textTheme.titleLarge,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
               Text(_countLabel, style: theme.textTheme.bodySmall),
             ],
           ),
@@ -341,6 +349,10 @@ class _ProductCard extends StatelessWidget {
 
   final Product product;
 
+  /// Kích thước vùng ảnh cố định để card không nhảy khi ảnh tải hoặc lỗi.
+  static const double _thumbSize = 48;
+  static const double _thumbRadius = 10;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -352,16 +364,15 @@ class _ProductCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: _thumbSize,
+              height: _thumbSize,
+              // Cắt ảnh theo bo góc giống placeholder.
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: theme.colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(_thumbRadius),
               ),
-              child: Icon(
-                Icons.spa,
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
+              child: _thumbnail(theme),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -408,6 +419,52 @@ class _ProductCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Ảnh sản phẩm từ `image_url` của API.
+  ///
+  /// Quay về placeholder khi URL rỗng hoặc ảnh tải lỗi. Trong lúc chờ ảnh hiện
+  /// spinner nhỏ, vẫn nằm trong khung 48x48 nên kích thước card không đổi.
+  Widget _thumbnail(ThemeData theme) {
+    final placeholder = _placeholderIcon(theme);
+    final url = product.imageUrl?.trim() ?? '';
+    if (url.isEmpty) {
+      return placeholder;
+    }
+    return Image.network(
+      url,
+      width: _thumbSize,
+      height: _thumbSize,
+      fit: BoxFit.cover,
+      // Chưa có frame nào thì hiện spinner, vẫn nằm gọn trong khung 48x48.
+      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+        if (frame == null) {
+          return _loadingIcon(theme);
+        }
+        return child;
+      },
+      // Ảnh hỏng hoặc URL không tồn tại: về lại icon, không crash.
+      errorBuilder: (context, error, stackTrace) => placeholder,
+    );
+  }
+
+  Widget _placeholderIcon(ThemeData theme) {
+    return Center(
+      child: Icon(Icons.spa, color: theme.colorScheme.onPrimaryContainer),
+    );
+  }
+
+  Widget _loadingIcon(ThemeData theme) {
+    return Center(
+      child: SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: theme.colorScheme.onPrimaryContainer,
         ),
       ),
     );
