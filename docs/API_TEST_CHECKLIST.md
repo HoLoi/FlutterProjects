@@ -15,7 +15,7 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
 | Base URL | `https://myphamkimcuong.id.vn` |
 | Namespace | `kc/v1` |
 | Prefix đầy đủ | `https://myphamkimcuong.id.vn/wp-json/kc/v1` |
-| WordPress | 7.1.1 |
+| WordPress | 7.1.2 |
 | PHP | 8.1 |
 | WooCommerce | 10.4.4 |
 | Phiên bản plugin | 1.0.0 |
@@ -111,7 +111,7 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
   "ok": true,
   "plugin": "mypham-kim-cuong-manager",
   "version": "1.0.0",
-  "wordpress": "7.1.1",
+  "wordpress": "7.1.2",
   "woocommerce_active": true
 }
 ```
@@ -121,7 +121,7 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
 - `ok` = `true`
 - `plugin` = `mypham-kim-cuong-manager`
 - `version` = `1.0.0`
-- `wordpress` = `7.1.1`
+- `wordpress` = `7.1.2`
 - `woocommerce_active` = `true` → nếu là `false` thì **dừng lại**, các endpoint còn lại sẽ trả `503`.
 
 ---
@@ -133,8 +133,8 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
 
   | Tham số | Kiểu | Mặc định | Ràng buộc |
   |---|---|---|---|
-  | `page` | integer | `1` | ≥ 1 |
-  | `per_page` | integer | `20` | 1–50, quá 50 sẽ trả `400` |
+  | `page` | integer | `1` | ≥ 1; sai (0, số âm, thập phân, chuỗi) sẽ trả `400 rest_invalid_param` |
+  | `per_page` | integer | `20` | 1–50; sai (0, số âm, thập phân, chuỗi, > 50) sẽ trả `400 rest_invalid_param` |
   | `search` | string | — | tối đa 200 ký tự |
 
 - **curl:**
@@ -322,9 +322,9 @@ JSON lỗi mong đợi:
 
   | Tham số | Kiểu | Mặc định | Ràng buộc |
   |---|---|---|---|
-  | `page` | integer | `1` | ≥ 1 |
-  | `per_page` | integer | `20` | 1–50 |
-  | `product_id` | integer | — | số nguyên > 0; bỏ trống thì lấy biến thể của tất cả sản phẩm |
+  | `page` | integer | `1` | ≥ 1; sai sẽ trả `400 rest_invalid_param` |
+  | `per_page` | integer | `20` | 1–50; sai sẽ trả `400 rest_invalid_param` |
+  | `product_id` | integer | — | số nguyên > 0; bỏ trống thì lấy biến thể của tất cả sản phẩm **đang publish** |
   | `search` | string | — | tối đa 200 ký tự |
 
 - **curl:**
@@ -336,6 +336,17 @@ JSON lỗi mong đợi:
   # Tìm biến thể theo tên / SKU / thuộc tính
   curl "https://myphamkimcuong.id.vn/wp-json/kc/v1/variations?search=do&per_page=50"
   ```
+
+> **Chỉ trả biến thể của sản phẩm cha đang `publish`.** Endpoint này lọc theo
+> trạng thái của *sản phẩm cha*, không phải trạng thái của chính biến thể (mọi
+> biến thể đều có `post_status` riêng là `publish`, nên lọc sai chỗ sẽ làm lộ
+> biến thể của sản phẩm nháp). Cụ thể:
+>
+> - Không truyền `product_id`: chỉ trả biến thể có cha đang `publish`.
+> - Truyền `product_id` của sản phẩm cha `draft`/`private`/`pending`, hoặc
+>   không tồn tại: trả `404 kc_not_found`.
+> - Không bao giờ lộ tên, SKU, giá, tồn kho hay thuộc tính của biến thể thuộc
+>   sản phẩm chưa publish.
 
 **HTTP mong đợi:** `200`
 
@@ -397,8 +408,8 @@ curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/variations?product_id=abc"
 
   | Tham số | Kiểu | Mặc định | Ràng buộc |
   |---|---|---|---|
-  | `page` | integer | `1` | ≥ 1 |
-  | `per_page` | integer | `20` | 1–50 |
+  | `page` | integer | `1` | ≥ 1; sai sẽ trả `400 rest_invalid_param` |
+  | `per_page` | integer | `20` | 1–50; sai sẽ trả `400 rest_invalid_param` |
   | `search` | string | — | tối đa 200 ký tự |
   | `status` | string | tất cả | chỉ nhận `any`, `pending`, `processing`, `on-hold`, `completed`, `cancelled`, `refunded`, `failed` |
   | `date_from` | date | — | định dạng `YYYY-MM-DD` |
@@ -580,19 +591,49 @@ Mọi lỗi của WordPress REST API đều trả về **cùng một cấu trúc
 }
 ```
 
-| HTTP | `code` | `message` | Nguyên nhân |
+**Mã lỗi chuẩn của API: hầu hết lỗi tham số đều trả HTTP `400` với `code` là
+`rest_invalid_param`.** Đây là hành vi của WordPress: mọi lỗi phát ra từ
+`validate_callback` cấp tham số (kể cả `WP_Error` có mã custom) đều bị WordPress
+bọc lại thành `rest_invalid_param`. Vì vậy `code` ở cấp ngoài **luôn** là
+`rest_invalid_param`, và mã chi tiết hơn chỉ xuất hiện tại
+`data.details[tên_tham_số].code`. App Flutter nên bắt lỗi theo **HTTP status**,
+không cần phân nhánh theo `code`.
+
+> **Ngoại lệ đã kiểm tra trên production: khoảng ngày ngược.**
+> `validate_orders_date_range()` là `validate_callback` **cấp route**, không phải
+> cấp tham số, nên WordPress **không** bọc lại mã lỗi của nó. Vì vậy
+> `GET /orders?date_from=2026-12-31&date_to=2026-01-01` trả:
+>
+> ```json
+> {
+>   "code": "kc_invalid_date_range",
+>   "message": "date_from phải nhỏ hơn hoặc bằng date_to.",
+>   "data": { "status": 400 }
+> }
+> ```
+>
+> HTTP status vẫn là `400` như mọi lỗi tham số khác, nên app bắt theo status là
+> đúng. Chỉ khác ở `code`.
+
+| HTTP | `code` (cấp ngoài) | `message` | Nguyên nhân |
 |---|---|---|---|
-| `400` | `kc_invalid_date` | Định dạng ngày phải là YYYY-MM-DD, ví dụ 2026-09-01. | `date_from` / `date_to` sai định dạng |
-| `400` | `kc_invalid_date_range` | date_from phải nhỏ hơn hoặc bằng date_to. | Khoảng ngày bị ngược |
-| `400` | `kc_invalid_status` | Trạng thái "xxx" không hợp lệ. Chỉ nhận: any, pending, … | `status` không nằm trong whitelist |
-| `400` | `kc_invalid_param` | Tham số phải là số nguyên lớn hơn 0. | `product_id` sai định dạng |
-| `400` | `rest_invalid_param` | (thông báo của WordPress) | `per_page` ngoài khoảng 1–50, `page` < 1, hoặc kiểu tham số sai |
+| `400` | `rest_invalid_param` | Tham số phải là số nguyên từ 1 đến 50. | `per_page` = 0, số âm, thập phân, chuỗi không phải số, hoặc > 50 |
+| `400` | `rest_invalid_param` | Tham số phải là số nguyên từ 1 đến 9223372036854775807. | `page` = 0, số âm, thập phân, hoặc chuỗi không phải số |
+| `400` | `rest_invalid_param` | Tham số phải là số nguyên từ 1 đến 9223372036854775807. | `product_id` sai định dạng, bằng 0 hoặc số âm |
+| `400` | `rest_invalid_param` | Định dạng ngày phải là YYYY-MM-DD, ví dụ 2026-09-01. | `date_from` / `date_to` sai định dạng |
+| `400` | **`kc_invalid_date_range`** | date_from phải nhỏ hơn hoặc bằng date_to. | **Khoảng ngày bị ngược** (ngoại lệ cấp route, xem khối trên) |
+| `400` | `rest_invalid_param` | Trạng thái "xxx" không hợp lệ. Chỉ nhận: any, pending, … | `status` không nằm trong whitelist |
 | `401` | `kc_not_authenticated` | Cần đăng nhập để xem đơn hàng. | Thiếu/sai Application Password trên `/orders` |
 | `403` | `kc_cannot_view_orders` | Tài khoản không có quyền xem đơn hàng. | Đã xác thực nhưng thiếu capability |
-| `404` | `kc_not_found` | Không tìm thấy sản phẩm. / Không tìm thấy đơn hàng. | id không tồn tại |
+| `404` | `kc_not_found` | Không tìm thấy sản phẩm. / Không tìm thấy đơn hàng. | id không tồn tại, hoặc sản phẩm cha của biến thể không publish |
 | `404` | `rest_no_route` | No route was found matching the URL and request method. | Sai đường dẫn, hoặc gửi sai method (ví dụ POST) |
 | `500` | `kc_terms_error` | Không đọc được danh mục sản phẩm. | Lỗi truy vấn danh mục |
+| `500` | `kc_order_detail_failed` | Không đọc được chi tiết đơn hàng. | Lỗi khi dựng payload chi tiết đơn (luôn trả JSON, không trả trang HTML) |
 | `503` | `kc_woocommerce_unavailable` | WooCommerce chưa active nên không đọc được dữ liệu. | WooCommerce đã bị deactivate |
+
+> Lưu ý thứ tự kiểm tra: WordPress kiểm tra tính hợp lệ tham số **trước**
+> `permission_callback`. Vì vậy `/orders?status=xxx` trả `400` (không phải
+> `401`) ngay cả khi chưa xác thực.
 
 **Phân biệt lỗi:** response thành công luôn có `wc_active: true` (trừ `/health` dùng
 `ok` và `woocommerce_active`). Nếu response không có `data` mà có `code` + `message`
@@ -632,13 +673,14 @@ Mọi lỗi của WordPress REST API đều trả về **cùng một cấu trúc
 | 7 | `GET /products/0` | `404 kc_not_found` | | ☐ Đạt ☐ Lỗi | |
 | 8 | `GET /categories` | `200`, có `data[]` | | ☐ Đạt ☐ Lỗi | |
 | 9 | `GET /variations?product_id={id}` | `200`, `product_id` đúng | | ☐ Đạt ☐ Lỗi | |
-| 10 | `GET /variations?product_id=abc` | `400 kc_invalid_param` | | ☐ Đạt ☐ Lỗi | |
+| 10 | `GET /variations?product_id=abc` | `400 rest_invalid_param` | | ☐ Đạt ☐ Lỗi | |
 | 11 | `GET /orders` **không auth** | `401 kc_not_authenticated` | | ☐ Đạt ☐ Lỗi | |
 | 12 | `GET /orders` **có auth** | `200`, có `data[]` | | ☐ Đạt ☐ Lỗi | |
 | 13 | `GET /orders?status=processing` | `200`, lọc đúng | | ☐ Đạt ☐ Lỗi | |
-| 14 | `GET /orders?status=xxx` | `400 kc_invalid_status` | | ☐ Đạt ☐ Lỗi | |
+| 14 | `GET /orders?status=xxx` | `400 rest_invalid_param` | | ☐ Đạt ☐ Lỗi | |
 | 15 | `GET /orders?date_from=2026-01-01&date_to=2026-12-31` | `200` | | ☐ Đạt ☐ Lỗi | |
-| 16 | `GET /orders?date_from=abc` | `400 kc_invalid_date` | | ☐ Đạt ☐ Lỗi | |
+| 16 | `GET /orders?date_from=abc` | `400 rest_invalid_param` | | ☐ Đạt ☐ Lỗi | |
+| 16b | `GET /orders?date_from=2026-12-31&date_to=2026-01-01` | `400 kc_invalid_date_range` | | ☐ Đạt ☐ Lỗi | |
 | 17 | `GET /orders/{id}` **có auth** | `200`, đủ trường chi tiết | | ☐ Đạt ☐ Lỗi | |
 | 18 | `GET /orders/{id}` **không auth** | `401 kc_not_authenticated` | | ☐ Đạt ☐ Lỗi | |
 | 19 | `GET /orders/99999999` **có auth** | `404 kc_not_found` | | ☐ Đạt ☐ Lỗi | |
@@ -651,11 +693,73 @@ Mọi lỗi của WordPress REST API đều trả về **cùng một cấu trúc
 | Vấn đề | Trạng thái |
 |---|---|
 | Chưa chạy được `php -l` (máy phát triển không có PHP) | Cần kiểm tra khi upload; nếu WordPress báo lỗi plugin sẽ báo ngay trong wp-admin |
-| Chưa runtime-test endpoint nào trên production | **Phải upload và tự kiểm tra** theo checklist này |
+| Đã runtime-test toàn bộ endpoint trên production (27/09/2026) | **Đạt**, gồm cả nhánh `/orders` có auth. Xem mục 7 |
 | `count` là số item trong trang, không phải tổng số bản ghi | Chấp nhận để giảm truy vấn `COUNT` |
 | `search` của `/variations` lọc sau khi lấy dữ liệu | Dùng `per_page=50` khi tìm biến thể |
 | Chỉ trả sản phẩm `publish` | Sản phẩm nháp không xuất hiện ở endpoint public |
+| `/variations` chỉ trả biến thể có cha `publish` | Sản phẩm nháp không lộ biến thể. `product_id` trỏ tới cha chưa publish trả `404 kc_not_found` |
+| Mã lỗi validation gần như luôn là `rest_invalid_param` | Hành vi mặc định của WordPress (mọi lỗi `validate_callback` cấp tham số đều bị bọc lại). **Ngoại lệ đã kiểm tra production:** khoảng ngày ngược trả `400 kc_invalid_date_range` vì đó là `validate_callback` cấp route. App bắt lỗi theo HTTP status |
 | Chưa có tổng tiền từng trạng thái đơn | App tự tính từ `total` của từng đơn |
+
+---
+
+## 8.1. URL cần kiểm tra lại sau khi sửa
+
+Ba thay đổi trong bản sửa gần nhất (`variations` lọc theo cha publish, validation
+`page`/`per_page` trả 400) cần xác nhận lại trên production sau khi upload:
+
+```bash
+# 1. Không còn biến thể của sản phẩm cha nháp 639 (trước đây trả 3 biến thể)
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/variations?per_page=50"
+#    → 200, mọi phần tử có product_id đều là sản phẩm publish
+
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/variations?product_id=639&per_page=50"
+#    → 404 kc_not_found
+
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/variations?search=buoi&per_page=50"
+#    → 200, chỉ còn biến thể của sản phẩm publish
+
+# 2. Validation page/per_page trả 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?per_page=0"    # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?per_page=51"   # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?per_page=100"  # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?per_page=-5"   # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?per_page=abc"  # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?page=0"        # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?page=-1"       # 400
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?page=abc"      # 400
+
+# 3. Giá trị hợp lệ vẫn chạy bình thường
+curl -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products?per_page=5&page=2"  # 200
+```
+
+> Lưu ý: `?per_page=abc` và `?page=abc` phải được gửi nguyên văn (không percent-encode).
+
+## 8.2. URL cần kiểm tra lại sau bản sửa order detail
+
+Bản sửa này đã được xác nhận trên production: `/orders/{id}` trả `200` JSON hợp lệ,
+không còn `500` trang HTML. Phạm vi thay đổi:
+
+- `handle_order_detail()` bọc `try/catch (\Throwable)` → lỗi trả JSON
+  `500 kc_order_detail_failed` thay vì trang "critical error" của WordPress.
+- 7 trường chỉ có ở chi tiết đơn đi qua `order_float_field()` / `order_text_field()`
+  (guard `is_callable()`, không dùng `method_exists`).
+- `serialize_order_items()` tách `try/catch` từng line item.
+
+```bash
+# Cần Application Password cho cả hai lệnh
+curl -i -u "user:app-password" \
+  "https://myphamkimcuong.id.vn/wp-json/kc/v1/orders/669"
+#    → 200, JSON hợp lệ, đủ 23 trường; KHÔNG phải trang HTML
+
+curl -i -u "user:app-password" \
+  "https://myphamkimcuong.id.vn/wp-json/kc/v1/orders/99999999"
+#    → 404 kc_not_found
+
+curl -i -u "user:app-password" \
+  "https://myphamkimcuong.id.vn/wp-json/kc/v1/orders?date_from=2026-12-31&date_to=2026-01-01"
+#    → 400 kc_invalid_date_range (ngoại lệ cấp route, xem mục 6)
+```
 
 ---
 

@@ -23,6 +23,14 @@ class MKC_REST_API {
 	const MAX_SEARCH_LENGTH = 200;
 
 	/**
+	 * Ghi nhớ trạng thái publish của sản phẩm cha trong phạm vi một request,
+	 * dùng cho endpoint /variations để tránh gọi wc_get_product() lặp lại.
+	 *
+	 * @var array<int,bool>
+	 */
+	private static $parent_status_cache = array();
+
+	/**
 	 * Đăng ký toàn bộ route.
 	 *
 	 * Public    : /health, /products, /products/{id}, /categories, /variations
@@ -94,7 +102,8 @@ class MKC_REST_API {
 					'validate_callback' => array( __CLASS__, 'validate_date_param' ),
 				),
 			),
-			array( __CLASS__, 'permission_orders' )
+			array( __CLASS__, 'permission_orders' ),
+			array( __CLASS__, 'validate_orders_date_range' )
 		);
 
 		self::register_item_route(
@@ -124,8 +133,9 @@ class MKC_REST_API {
 	 * @param bool     $with_search Bật tham số search.
 	 * @param array    $extra_args  Tham số riêng của route.
 	 * @param callable $permission  permission_callback, mặc định public.
+	 * @param callable $validate    validate_callback cấp route, tuỳ chọn.
 	 */
-	private static function register_list_route( $path, $callback, $with_search = false, $extra_args = array(), $permission = null ) {
+	private static function register_list_route( $path, $callback, $with_search = false, $extra_args = array(), $permission = null, $validate = null ) {
 		$args = self::pagination_args();
 
 		if ( $with_search ) {
@@ -140,7 +150,7 @@ class MKC_REST_API {
 			$args = array_merge( $args, $extra_args );
 		}
 
-		self::register_rest_route( $path, $callback, $args, $permission );
+		self::register_rest_route( $path, $callback, $args, $permission, $validate );
 	}
 
 	/**
@@ -162,29 +172,34 @@ class MKC_REST_API {
 	 * @param callable $callback    Handler.
 	 * @param array    $extra_args  Tham số của route.
 	 * @param callable $permission  permission_callback, mặc định public.
+	 * @param callable $validate    validate_callback cấp route, tuỳ chọn.
 	 */
-	private static function register_rest_route( $path, $callback, $extra_args, $permission ) {
+	private static function register_rest_route( $path, $callback, $extra_args, $permission, $validate = null ) {
 		if ( null === $permission ) {
 			$permission = array( __CLASS__, 'permission_public' );
 		}
 
-		register_rest_route(
-			self::REST_NAMESPACE,
-			$path,
-			array(
-				'methods'             => 'GET',
-				'callback'            => $callback,
-				'permission_callback' => $permission,
-				'args'                => $extra_args,
-			)
+		$route_args = array(
+			'methods'             => 'GET',
+			'callback'            => $callback,
+			'permission_callback' => $permission,
+			'args'                => $extra_args,
 		);
+
+		if ( null !== $validate ) {
+			$route_args['validate_callback'] = $validate;
+		}
+
+		register_rest_route( self::REST_NAMESPACE, $path, $route_args );
 	}
 
 	/**
 	 * Tham số phân trang dùng chung.
 	 *
-	 * per_page tối đa 50, tối thiểu 1. Giá trị ngoài khoảng sẽ bị WordPress
-	 * trả về 400 rest_invalid_param.
+	 * per_page tối đa 50, tối thiểu 1. Giá trị sai bị từ chối bằng HTTP 400
+	 * (mã `rest_invalid_param`) TRƯỚC khi tới handler: validate_callback kiểm
+	 * trên giá trị thô, nên không có chuyện âm thầm sửa `0`, số âm hay chuỗi
+	 * không phải số thành giá trị hợp lệ.
 	 *
 	 * @return array
 	 */
@@ -197,6 +212,7 @@ class MKC_REST_API {
 				'minimum'           => 1,
 				'maximum'           => self::MAX_PER_PAGE,
 				'sanitize_callback' => 'absint',
+				'validate_callback' => array( __CLASS__, 'validate_per_page' ),
 			),
 			'page'     => array(
 				'type'              => 'integer',
@@ -204,6 +220,7 @@ class MKC_REST_API {
 				'default'           => 1,
 				'minimum'           => 1,
 				'sanitize_callback' => 'absint',
+				'validate_callback' => array( __CLASS__, 'validate_page' ),
 			),
 		);
 	}
@@ -275,7 +292,101 @@ class MKC_REST_API {
 
 	/* ---------------------------------------------------------------------
 	 * Validate callbacks
+	 *
+	 * Lưu ý quan trọng về mã lỗi: WordPress LUÔN bọc mọi lỗi trả ra từ
+	 * validate_callback (kể cả WP_Error có mã custom) thành WP_Error mã
+	 * `rest_invalid_param` với HTTP 400. Vì vậy hợp đồng chuẩn của API là:
+	 *   - HTTP 400 + code `rest_invalid_param` cho mọi lỗi tham số.
+	 *   - `data.details[tên_tham_số].code` giữ mã chi tiết hơn (nếu có).
+	 * App Flutter chỉ cần bắt theo HTTP status là đủ.
 	 * ------------------------------------------------------------------ */
+
+	/**
+	 * Kiểm tra một tham số phải là số nguyên trong khoảng [min, max].
+	 *
+	 * Cố ý KHÔNG dùng absint()/intval() trước khi kiểm tra: absint('-5') trả về
+	 * 5 nên giá trị âm sẽ bị biến thành giá trị hợp lệ. Giá trị thô từ query
+	 * string luôn là string, nên ta kiểm tra bằng regex chỉ chấp nhận chữ số.
+	 *
+	 * @param mixed  $value       Giá trị thô.
+	 * @param int    $min         Giá trị nhỏ nhất.
+	 * @param int    $max         Giá trị lớn nhất.
+	 * @param string $param_name  Tên tham số để hiển thị trong message.
+	 * @return true|WP_Error
+	 */
+	private static function validate_integer_in_range( $value, $min, $max, $param_name ) {
+		if ( is_int( $value ) ) {
+			$number = $value;
+		} elseif ( is_string( $value ) && 1 === preg_match( '/^[0-9]+$/', $value ) ) {
+			$number = (int) $value;
+		} else {
+			$number = null;
+		}
+
+		if ( null === $number || $number < $min || $number > $max ) {
+			return new WP_Error(
+				'kc_invalid_param',
+				sprintf(
+					'Tham số "%1$s" phải là số nguyên từ %2$d đến %3$d.',
+					$param_name,
+					$min,
+					$max
+				),
+				array( 'status' => 400 )
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * per_page phải là số nguyên từ 1 đến 50.
+	 *
+	 * @param mixed $value Giá trị thô.
+	 * @return true|WP_Error
+	 */
+	public static function validate_per_page( $value ) {
+		return self::validate_integer_in_range( $value, 1, self::MAX_PER_PAGE, 'per_page' );
+	}
+
+	/**
+	 * page phải là số nguyên từ 1 trở lên.
+	 *
+	 * @param mixed $value Giá trị thô.
+	 * @return true|WP_Error
+	 */
+	public static function validate_page( $value ) {
+		return self::validate_integer_in_range( $value, 1, PHP_INT_MAX, 'page' );
+	}
+
+	/**
+	 * Kiểm tra chéo date_from/date_to cho route /orders.
+	 *
+	 * Đây là validate_callback cấp route nên chạy cùng lúc với các validate
+	 * tham số khác, tức là TRƯỚC permission_callback. Nhờ vậy khoảng ngày bị
+	 * ngược trả 400 ngay cả khi người gọi chưa xác thực, thay vì 401.
+	 *
+	 * @param WP_REST_Request $request Request instance.
+	 * @return true|WP_Error
+	 */
+	public static function validate_orders_date_range( $request ) {
+		$from = trim( (string) $request->get_param( 'date_from' ) );
+		$to   = trim( (string) $request->get_param( 'date_to' ) );
+
+		if ( '' === $from || '' === $to ) {
+			return true;
+		}
+
+		if ( strtotime( $from ) <= strtotime( $to ) ) {
+			return true;
+		}
+
+		return new WP_Error(
+			'kc_invalid_date_range',
+			'date_from phải nhỏ hơn hoặc bằng date_to.',
+			array( 'status' => 400 )
+		);
+	}
 
 	/**
 	 * id trong path phải là số nguyên dương, nếu không coi như không tồn tại.
@@ -284,10 +395,13 @@ class MKC_REST_API {
 	 * @return true|WP_Error
 	 */
 	public static function validate_resource_id( $value ) {
-		if ( absint( $value ) > 0 ) {
+		$check = self::validate_integer_in_range( $value, 1, PHP_INT_MAX, 'id' );
+
+		if ( true === $check ) {
 			return true;
 		}
 
+		// id không hợp lệ trong path không phải lỗi tham số mà là "không tồn tại".
 		return new WP_Error(
 			'kc_not_found',
 			'Không tìm thấy dữ liệu.',
@@ -306,15 +420,7 @@ class MKC_REST_API {
 			return true;
 		}
 
-		if ( absint( $value ) > 0 ) {
-			return true;
-		}
-
-		return new WP_Error(
-			'kc_invalid_param',
-			'Tham số phải là số nguyên lớn hơn 0.',
-			array( 'status' => 400 )
-		);
+		return self::validate_integer_in_range( $value, 1, PHP_INT_MAX, 'product_id' );
 	}
 
 	/**
@@ -519,6 +625,13 @@ class MKC_REST_API {
 	/**
 	 * Biến thể sản phẩm. Có thể lọc theo product_id.
 	 *
+	 * CHỈ trả biến thể thuộc sản phẩm cha đang `publish`. Trạng thái của
+	 * sản phẩm cha được kiểm tra bằng WooCommerce CRUD (`wc_get_product`),
+	 * không dùng SQL trực tiếp. Nếu không kiểm tra, biến thể của sản phẩm
+	 * nháp sẽ bị lộ công khai qua endpoint public này (biến thể luôn có
+	 * post_status `publish` riêng, nên lọc theo trạng thái của chính biến thể
+	 * là không đủ).
+	 *
 	 * Lưu ý: tham số `search` được áp dụng SAU khi lấy dữ liệu từ database
 	 * (WooCommerce không hỗ trợ search chuẩn cho biến thể). Khi dùng search
 	 * nên đặt per_page cao (tối đa 50) để giảm khả năng bị lọc mất kết quả.
@@ -534,12 +647,18 @@ class MKC_REST_API {
 
 		$per_page   = self::per_page( $request );
 		$page       = self::page( $request );
-		$product_id = absint( $request->get_param( 'product_id' ) );
+		$product_id = (int) $request->get_param( 'product_id' );
 		$search     = self::search_term( $request );
+
+		// product_id trỏ tới sản phẩm cha chưa publish (draft, private,
+		// pending) hoặc không tồn tại: không trả biến thể nào.
+		if ( $product_id > 0 && ! self::is_published_parent( $product_id ) ) {
+			return self::not_found_error( 'Không tìm thấy sản phẩm.' );
+		}
 
 		$args = array(
 			'type'     => 'variation',
-			'status'   => array( 'publish', 'private' ),
+			'status'   => 'publish',
 			'limit'    => $per_page,
 			'page'     => $page,
 			'orderby'  => 'id',
@@ -553,9 +672,18 @@ class MKC_REST_API {
 
 		$items = array();
 		foreach ( wc_get_products( $args ) as $variation ) {
-			if ( $variation instanceof WC_Product_Variation ) {
-				$items[] = self::serialize_variation( $variation );
+			if ( ! $variation instanceof WC_Product_Variation ) {
+				continue;
 			}
+
+			// Bỏ biến thể của sản phẩm cha không publish. Khi đã lọc theo
+			// product_id thì bước này thừa nhưng giữ nguyên để mọi nhánh đều
+			// an toàn.
+			if ( ! self::is_published_parent( $variation->get_parent_id() ) ) {
+				continue;
+			}
+
+			$items[] = self::serialize_variation( $variation );
 		}
 
 		if ( '' !== $search ) {
@@ -597,10 +725,15 @@ class MKC_REST_API {
 		$from     = trim( (string) $request->get_param( 'date_from' ) );
 		$to       = trim( (string) $request->get_param( 'date_to' ) );
 
+		// Khoảng ngày ngược (date_from > date_to) bị validate_orders_date_range()
+		// chặn trước ở cấp route và trả HTTP 400 với mã `kc_invalid_date_range`.
+		// Nhánh dưới đây chỉ là lưới an toàn cho chuỗi ngày mà strtotime() không
+		// phân tích được (ví dụ 2026-02-30) nên validate cấp route bỏ qua; nhánh này
+		// trả mã chuẩn `rest_invalid_param` của WordPress. Cả hai đều là HTTP 400.
 		if ( '' !== $from && '' !== $to && $from > $to ) {
 			return new WP_Error(
-				'kc_invalid_date_range',
-				'date_from phải nhỏ hơn hoặc bằng date_to.',
+				'rest_invalid_param',
+				'Tham số "date_from" phải nhỏ hơn hoặc bằng "date_to".',
 				array( 'status' => 400 )
 			);
 		}
@@ -667,15 +800,23 @@ class MKC_REST_API {
 			return self::not_found_error( 'Không tìm thấy đơn hàng.' );
 		}
 
-		$payload                    = self::serialize_order( $order );
-		$payload['wc_active']       = true;
-		$payload['customer_note']   = $order->get_customer_note();
-		$payload['subtotal']        = (float) $order->get_subtotal();
-		$payload['discount_total']  = (float) $order->get_discount_total();
-		$payload['shipping_total']  = (float) $order->get_shipping_total();
-		$payload['fee_total']       = (float) $order->get_fee_total();
-		$payload['refunded_total']  = (float) $order->get_total_refunded();
-		$payload['created_via']     = self::text_or_null( $order->get_created_via() );
+		try {
+			$payload                    = self::serialize_order( $order );
+			$payload['wc_active']       = true;
+			$payload['customer_note']   = self::order_text_field( $order, 'get_customer_note' );
+			$payload['subtotal']        = self::order_float_field( $order, 'get_subtotal' );
+			$payload['discount_total']  = self::order_float_field( $order, 'get_discount_total' );
+			$payload['shipping_total']  = self::order_float_field( $order, 'get_shipping_total' );
+			$payload['fee_total']       = self::order_float_field( $order, 'get_fee_total' );
+			$payload['refunded_total']  = self::order_float_field( $order, 'get_total_refunded' );
+			$payload['created_via']     = self::order_text_field( $order, 'get_created_via' );
+		} catch ( \Throwable $e ) {
+			return new \WP_Error(
+				'kc_order_detail_failed',
+				'Không đọc được chi tiết đơn hàng.',
+				array( 'status' => 500 )
+			);
+		}
 
 		return rest_ensure_response( $payload );
 	}
@@ -884,22 +1025,37 @@ class MKC_REST_API {
 				continue;
 			}
 
-			$product    = $item->get_product();
-			$quantity   = (float) $item->get_quantity();
-			$subtotal   = (float) $order->get_item_subtotal( $item );
-			$unit_price = ( $quantity > 0 ) ? ( $subtotal / $quantity ) : $subtotal;
+			try {
+				$product    = $item->get_product();
+				$quantity   = (float) $item->get_quantity();
+				$subtotal   = (float) $order->get_item_subtotal( $item );
+				$unit_price = ( $quantity > 0 ) ? ( $subtotal / $quantity ) : $subtotal;
 
-			$items[] = array(
-				'id'           => (int) $item_id,
-				'product_id'   => (int) $item->get_product_id(),
-				'variation_id' => (int) $item->get_variation_id(),
-				'name'         => $item->get_name(),
-				'sku'          => ( $product instanceof WC_Product ) ? self::text_or_null( $product->get_sku() ) : null,
-				'quantity'     => $quantity,
-				'price'        => $unit_price,
-				'subtotal'     => $subtotal,
-				'total'        => (float) $item->get_total(),
-			);
+				$items[] = array(
+					'id'           => (int) $item_id,
+					'product_id'   => (int) $item->get_product_id(),
+					'variation_id' => (int) $item->get_variation_id(),
+					'name'         => (string) $item->get_name(),
+					'sku'          => ( $product instanceof WC_Product ) ? self::text_or_null( $product->get_sku() ) : null,
+					'quantity'     => $quantity,
+					'price'        => $unit_price,
+					'subtotal'     => $subtotal,
+					'total'        => (float) $item->get_total(),
+				);
+			} catch ( \Throwable $e ) {
+				// Line item hỏng dữ liệu vẫn phải xuất hiện với giá trị null.
+				$items[] = array(
+					'id'           => (int) $item_id,
+					'product_id'   => (int) $item->get_product_id(),
+					'variation_id' => (int) $item->get_variation_id(),
+					'name'         => null,
+					'sku'          => null,
+					'quantity'     => 0.0,
+					'price'        => null,
+					'subtotal'     => 0.0,
+					'total'        => 0.0,
+				);
+			}
 		}
 
 		return $items;
@@ -1061,26 +1217,52 @@ class MKC_REST_API {
 	}
 
 	/**
-	 * per_page: tối đa 50, tối thiểu 1.
+	 * per_page đã được validate_per_page() kiểm tra nằm trong 1–50 trước khi
+	 * tới handler, nên ở đây chỉ đọc giá trị, KHÔNG tự sửa cho hợp lệ.
 	 *
 	 * @param WP_REST_Request $request Request instance.
 	 * @return int
 	 */
 	private static function per_page( $request ) {
-		$per_page = (int) $request->get_param( 'per_page' );
-		$per_page = min( max( $per_page, 1 ), self::MAX_PER_PAGE );
-
-		return $per_page;
+		return (int) $request->get_param( 'per_page' );
 	}
 
 	/**
-	 * page tối thiểu là 1.
+	 * page đã được validate_page() kiểm tra là số nguyên từ 1 trở lên.
 	 *
 	 * @param WP_REST_Request $request Request instance.
 	 * @return int
 	 */
 	private static function page( $request ) {
-		return max( (int) $request->get_param( 'page' ), 1 );
+		return (int) $request->get_param( 'page' );
+	}
+
+	/**
+	 * Sản phẩm cha có đang publish hay không.
+	 *
+	 * Dùng WooCommerce CRUD `wc_get_product()` (đọc trực tiếp post, không lọc
+	 * theo trạng thái) nên nhận diện được cả draft/private/pending. Kết quả
+	 * được ghi nhớ trong phạm vi một request để tránh gọi lặp khi một trang có
+	 * nhiều biến thể cùng cha.
+	 *
+	 * @param int $parent_id ID sản phẩm cha.
+	 * @return bool
+	 */
+	private static function is_published_parent( $parent_id ) {
+		$parent_id = (int) $parent_id;
+
+		if ( $parent_id <= 0 ) {
+			return false;
+		}
+
+		if ( ! array_key_exists( $parent_id, self::$parent_status_cache ) ) {
+			$parent = wc_get_product( $parent_id );
+
+			self::$parent_status_cache[ $parent_id ] = ( $parent instanceof WC_Product )
+				&& ( 'publish' === $parent->get_status() );
+		}
+
+		return self::$parent_status_cache[ $parent_id ];
 	}
 
 	/**
@@ -1143,6 +1325,43 @@ class MKC_REST_API {
 	 */
 	private static function price_or_zero( $value ) {
 		return ( null === $value || '' === $value ) ? 0.0 : (float) $value;
+	}
+
+	/**
+	 * Getter số của order, an toàn khi method không tồn tại hoặc trả rỗng.
+	 *
+	 * Dùng is_callable() thay vì method_exists() để chỉ gọi method public thật,
+	 * tránh rơi vào __call() và tránh fatal trên PHP 8.
+	 *
+	 * @param WC_Order $order  Order object.
+	 * @param string   $method Tên getter.
+	 * @return float
+	 */
+	private static function order_float_field( WC_Order $order, $method ) {
+		if ( ! is_callable( array( $order, $method ) ) ) {
+			return 0.0;
+		}
+
+		$value = $order->{$method}();
+
+		return is_numeric( $value ) ? (float) $value : 0.0;
+	}
+
+	/**
+	 * Getter chuỗi của order, an toàn khi method không tồn tại hoặc trả rỗng.
+	 *
+	 * @param WC_Order $order  Order object.
+	 * @param string   $method Tên getter.
+	 * @return string|null
+	 */
+	private static function order_text_field( WC_Order $order, $method ) {
+		if ( ! is_callable( array( $order, $method ) ) ) {
+			return null;
+		}
+
+		$value = $order->{$method}();
+
+		return is_scalar( $value ) ? self::text_or_null( $value ) : null;
 	}
 
 	/**
