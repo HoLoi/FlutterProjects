@@ -13,6 +13,9 @@ Giai đoạn MVP-10 → MVP-12 **chỉ dùng GET** — read-only.
 Từ MVP-12, endpoint đơn hàng (`/orders`, `/orders/{id}`) **yêu cầu xác thực**;
 endpoint catalog vẫn public. Chi tiết ở mục 6.
 
+Ngoại lệ so với "catalog public": `GET /products/barcode/{barcode}` cũng yêu
+cầu xác thực vì trả cả sản phẩm nháp. Chi tiết ở mục 4.
+
 Từ MVP-13 có **một** endpoint ghi duy nhất: `POST /pos/sales`. Xem
 [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md). Endpoint này mới chỉ có mã
 trong plugin, **chưa upload lên production**.
@@ -140,6 +143,84 @@ Endpoint trả về **toàn bộ** biến thể của sản phẩm nên `page` l
 
 `stock_quantity` có thể là `null`. `image_url` lấy ảnh biến thể, nếu không có thì lấy ảnh sản phẩm cha.
 
+### GET `/products/barcode/{barcode}` — **yêu cầu xác thực**
+Tra cứu đúng một sản phẩm hoặc biến thể theo barcode, phục vụ luồng quét
+mã của app POS. Barcode lấy từ path, không có tham số query.
+
+| Mục | Quy tắc |
+|---|---|
+| Xác thực | Application Password qua HTTPS, bắt buộc |
+| Capability | `manage_woocommerce`, hoặc `edit_shop_products`, hoặc `edit_products` |
+| Định dạng barcode | 1–64 ký tự, chỉ gồm `A–Z a–z 0–9 . _ -` |
+| Nguồn dữ liệu | meta `_mkc_barcode` (chính), fallback `_barcode` |
+| Bao gồm sản phẩm nháp | Có (`draft`, `private`) — vì sao phải xác thực |
+
+Sản phẩm simple:
+
+```json
+{
+  "found": true,
+  "type": "simple",
+  "product_id": 101,
+  "variation_id": 0,
+  "name": "Son Kem Lì Satin",
+  "parent": null,
+  "sku": "KC-0001",
+  "barcode": "893000000001",
+  "price": 189000,
+  "regular_price": 189000,
+  "sale_price": null,
+  "stock_quantity": 25,
+  "stock_status": "instock",
+  "status": "publish",
+  "manage_stock": true,
+  "image_url": "https://myphamkimcuong.id.vn/wp-content/uploads/son.png",
+  "attributes": [],
+  "ambiguous": false
+}
+```
+
+Biến thể (`type: "variation"`) khác ở chỗ `product_id` là id sản phẩm cha,
+`variation_id` là id biến thể, `name` là tên đầy đủ đã ghép option, `parent`
+mô tả sản phẩm cha và `attributes` liệt kê option:
+
+```json
+{
+  "found": true,
+  "type": "variation",
+  "product_id": 101,
+  "variation_id": 88,
+  "name": "Son Kem Lì Satin - Dung lượng: 30ml",
+  "parent": { "id": 101, "name": "Son Kem Lì Satin", "sku": "KC-0001", "status": "publish" },
+  "sku": "KC-0001-30",
+  "barcode": "893000000001",
+  "price": 189000,
+  "regular_price": 189000,
+  "sale_price": null,
+  "stock_quantity": 10,
+  "stock_status": "instock",
+  "status": "publish",
+  "manage_stock": true,
+  "image_url": "https://myphamkimcuong.id.vn/wp-content/uploads/son.png",
+  "attributes": [{ "name": "Dung lượng", "option": "30ml" }],
+  "ambiguous": false
+}
+```
+
+`ambiguous: true` nghĩa là barcode trùng ở nhiều sản phẩm; response trả về
+sản phẩm có id nhỏ nhất. App nên cảnh báo người dùng thay vì âm thầm bán.
+
+Mã lỗi:
+
+| Tình huống | HTTP | `code` |
+|---|---|---|
+| Chưa xác thực | `401` | `kc_not_authenticated` |
+| Không phải HTTPS | `403` | `kc_https_required` |
+| Thiếu capability | `403` | `kc_cannot_view_products` |
+| WooCommerce chưa active | `503` | `kc_woocommerce_unavailable` |
+| Barcode rỗng / sai định dạng / quá dài | `400` | `kc_invalid_barcode` |
+| Không có sản phẩm nào khớp | `404` | `kc_not_found` |
+
 ### GET `/orders` — **yêu cầu xác thực**
 Danh sách đơn hàng WooCommerce (HPOS-safe, đọc bằng `wc_get_orders()`), mới nhất trước.
 Tham số: `page`, `per_page`, `status`, `search`, `date_from`, `date_to`.
@@ -240,12 +321,17 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 | `GET /products` | Public | Không |
 | `GET /categories` | Public | Không |
 | `GET /variations` | Public | Không |
+| `GET /products/barcode/{barcode}` | **Bắt buộc** | Xem sản phẩm |
 | `GET /orders` | **Bắt buộc** | Xem đơn hàng |
 | `GET /orders/{id}` | **Bắt buộc** | Xem đơn hàng |
 | `POST /pos/sales` | **Bắt buộc** | `manage_woocommerce` |
 
 "Xem đơn hàng" = `manage_woocommerce`, hoặc `edit_shop_orders`, hoặc
 `read_private_shop_orders` (theo thứ tự ưu tiên).
+
+"Xem sản phẩm" = `manage_woocommerce`, hoặc `edit_shop_products`, hoặc
+`edit_products` (theo thứ tự ưu tiên). Endpoint này cần quyền này vì trả cả
+sản phẩm nháp.
 
 Mã lỗi trả về:
 
