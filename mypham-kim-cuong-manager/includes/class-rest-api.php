@@ -35,6 +35,8 @@ class MKC_REST_API {
 	 *
 	 * Public    : /health, /products, /products/{id}, /categories, /variations
 	 * Cần xác thực: /orders, /orders/{id}
+	 *
+	 * Ghi       : /pos/sales (class-pos.php), /products POST (class-product-create.php)
 	 */
 	public static function register_routes() {
 		register_rest_route(
@@ -47,10 +49,18 @@ class MKC_REST_API {
 			)
 		);
 
+		// GET và POST cùng path nên phải nằm trong MỘT lệnh gọi register_rest_route.
+		// Nếu đăng ký POST ở một lệnh gọi riêng, kết quả ghép route phụ thuộc hành vi
+		// merge nội bộ của WP core (chưa kiểm chứng được ở môi trường này) và có thể
+		// làm mất `args` phân trang của GET. Một lệnh gọi duy nhất thì không có mơ hồ.
 		self::register_list_route(
 			'/products',
 			array( __CLASS__, 'handle_products' ),
-			true
+			true,
+			array(),
+			null,
+			null,
+			array( MKC_Product_Create_API::create_endpoint() )
 		);
 
 		self::register_item_route(
@@ -128,14 +138,15 @@ class MKC_REST_API {
 	/**
 	 * Đăng ký route danh sách (có phân trang + search).
 	 *
-	 * @param string   $path        Đường dẫn sau namespace.
-	 * @param callable $callback    Handler.
-	 * @param bool     $with_search Bật tham số search.
-	 * @param array    $extra_args  Tham số riêng của route.
-	 * @param callable $permission  permission_callback, mặc định public.
-	 * @param callable $validate    validate_callback cấp route, tuỳ chọn.
+	 * @param string   $path           Đường dẫn sau namespace.
+	 * @param callable $callback       Handler.
+	 * @param bool     $with_search    Bật tham số search.
+	 * @param array    $extra_args     Tham số riêng của route.
+	 * @param callable $permission     permission_callback, mặc định public.
+	 * @param callable $validate       validate_callback cấp route, tuỳ chọn.
+	 * @param array    $extra_endpoints Endpoint bổ sung khác method trên cùng path.
 	 */
-	private static function register_list_route( $path, $callback, $with_search = false, $extra_args = array(), $permission = null, $validate = null ) {
+	private static function register_list_route( $path, $callback, $with_search = false, $extra_args = array(), $permission = null, $validate = null, $extra_endpoints = array() ) {
 		$args = self::pagination_args();
 
 		if ( $with_search ) {
@@ -150,7 +161,7 @@ class MKC_REST_API {
 			$args = array_merge( $args, $extra_args );
 		}
 
-		self::register_rest_route( $path, $callback, $args, $permission, $validate );
+		self::register_rest_route( $path, $callback, $args, $permission, $validate, $extra_endpoints );
 	}
 
 	/**
@@ -168,13 +179,17 @@ class MKC_REST_API {
 	/**
 	 * Đăng ký một route GET read-only.
 	 *
-	 * @param string   $path        Đường dẫn sau namespace.
-	 * @param callable $callback    Handler.
-	 * @param array    $extra_args  Tham số của route.
-	 * @param callable $permission  permission_callback, mặc định public.
-	 * @param callable $validate    validate_callback cấp route, tuỳ chọn.
+	 * `$extra_endpoints` cho phép gắn thêm endpoint khác method (ví dụ POST) vào
+	 * CÙNG một lệnh gọi `register_rest_route`, tránh phải đăng ký lại path đã có.
+	 *
+	 * @param string   $path            Đường dẫn sau namespace.
+	 * @param callable $callback        Handler.
+	 * @param array    $extra_args      Tham số của route.
+	 * @param callable $permission      permission_callback, mặc định public.
+	 * @param callable $validate        validate_callback cấp route, tuỳ chọn.
+	 * @param array    $extra_endpoints Endpoint bổ sung khác method trên cùng path.
 	 */
-	private static function register_rest_route( $path, $callback, $extra_args, $permission, $validate = null ) {
+	private static function register_rest_route( $path, $callback, $extra_args, $permission, $validate = null, $extra_endpoints = array() ) {
 		if ( null === $permission ) {
 			$permission = array( __CLASS__, 'permission_public' );
 		}
@@ -188,6 +203,22 @@ class MKC_REST_API {
 
 		if ( null !== $validate ) {
 			$route_args['validate_callback'] = $validate;
+		}
+
+		// Nhiều endpoint trên cùng một path: dùng dạng danh sách (array of
+		// endpoint) của `register_rest_route()`. Dạng này là định nghĩa rõ ràng
+		// của WP core cho route có nhiều method, không dựa vào cơ chế merge khi
+		// gọi `register_rest_route()` nhiều lần với cùng path.
+		if ( ! empty( $extra_endpoints ) ) {
+			$route_args = array( $route_args );
+
+			foreach ( $extra_endpoints as $extra_endpoint ) {
+				if ( ! is_array( $extra_endpoint ) || ! isset( $extra_endpoint['methods'] ) ) {
+					continue;
+				}
+
+				$route_args[] = $extra_endpoint;
+			}
 		}
 
 		register_rest_route( self::REST_NAMESPACE, $path, $route_args );

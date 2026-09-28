@@ -16,9 +16,11 @@ endpoint catalog vẫn public. Chi tiết ở mục 6.
 Ngoại lệ so với "catalog public": `GET /products/barcode/{barcode}` cũng yêu
 cầu xác thực vì trả cả sản phẩm nháp. Chi tiết ở mục 4.
 
-Từ MVP-13 có **một** endpoint ghi duy nhất: `POST /pos/sales`. Xem
-[POS_API_SPECIFICATION](POS_API_SPECIFICATION.md). Endpoint này mới chỉ có mã
-trong plugin, **chưa upload lên production**.
+Từ MVP-13 có **hai** endpoint ghi: `POST /pos/sales` (tạo đơn hàng) và
+`POST /products` (tạo sản phẩm). Cả hai đều yêu cầu
+`manage_woocommerce`. Xem [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md) và
+mục 4. Cả hai endpoint này mới chỉ có mã trong plugin, **chưa upload lên
+production**.
 
 ## 2. Quy ước chung
 
@@ -221,6 +223,125 @@ Mã lỗi:
 | Barcode rỗng / sai định dạng / quá dài | `400` | `kc_invalid_barcode` |
 | Không có sản phẩm nào khớp | `404` | `kc_not_found` |
 
+### POST `/products` — **yêu cầu xác thực**
+Tạo **một sản phẩm đơn giản (simple)**. Phục vụ luồng "quét mã lạ → nhập nhanh
+thành sản phẩm mới" của app POS.
+
+Phạm vi cố ý hẹp, nhằm giữ cho endpoint an toàn và dễ kiểm chứng:
+
+| Ngoài phạm vi | Lý do |
+|---|---|
+| Không tạo biến thể / sản phẩm nhóm / sản phẩm ngoài | Sản phẩm biến thể phải tạo trước trong trang quản trị WooCommerce |
+| Không upload ảnh | Ảnh được đặt sau trong trang quản trị |
+| Không chỉnh sửa, không xoá sản phẩm đã có | Chỉ tạo, không sửa |
+| Không quản lý lô hàng / nhiều kho / nhập kho | Ngoài phạm vi POS |
+
+| Mục | Quy tắc |
+|---|---|
+| Xác thực | Application Password qua HTTPS, bắt buộc |
+| Capability | `manage_woocommerce` |
+| Content-Type | `application/json` |
+| Mặc định | `status: "draft"` — người dùng rà soát trước khi đăng bán |
+| Idempotency | Không có. Tạo hai lần là tạo hai sản phẩm. App tự khoá nút. |
+
+Request:
+
+```json
+{
+  "name": "Son Kem Lì Satin 30ml",
+  "barcode": "893000000123",
+  "sku": "KC-0123",
+  "regular_price": 189000,
+  "sale_price": 159000,
+  "stock_quantity": 12,
+  "manage_stock": true,
+  "stock_status": "instock",
+  "status": "draft",
+  "short_description": "Son lì satin mềm mại, giữ màu 8 giờ.",
+  "description": ""
+}
+```
+
+| Trường | Bắt buộc | Kiểu | Quy tắc |
+|---|---|---|---|
+| `name` | Có | string | Bắt buộc, không rỗng sau khi làm sạch, tối đa 200 ký tự. |
+| `barcode` | Có | string | 1–64 ký tự, chỉ `A–Z a–z 0–9 . _ -`. Phải duy nhất. |
+| `sku` | Không | string | Tối đa 100 ký tự, cùng bộ ký tự. Phải duy nhất. Bỏ trống thì không đặt SKU. |
+| `regular_price` | Có | number \| string | Số không âm, tối đa 999999999. Chấp nhận chuỗi số. |
+| `sale_price` | Không | number \| string | Mặc định không giảm giá. Nếu > 0 thì phải nhỏ hơn `regular_price`. |
+| `stock_quantity` | Không | int | Mặc định `0`. Số nguyên không âm, tối đa 999999. Số thập phân và số âm bị từ chối. |
+| `manage_stock` | Không | bool | Mặc định `true`. Chấp nhận `"true"`/`"false"` và `0`/`1`. |
+| `stock_status` | Không | string | Mặc định suy ra từ `stock_quantity`: `> 0` → `instock`, `0` → `outofstock`. Chỉ nhận `instock`, `outofstock`, `onbackorder`. |
+| `status` | Không | string | Mặc định `draft`. Chỉ nhận `draft`, `publish`. |
+| `short_description` | Không | string | Cắt còn tối đa 500 ký tự. |
+| `description` | Không | string | Cắt còn tối đa 5000 ký tự. |
+
+Sản phẩm trả về dùng chung model với `GET /products/barcode/{barcode}`:
+
+```json
+{
+  "success": true,
+  "product": {
+    "id": 712,
+    "product_id": 712,
+    "variation_id": 0,
+    "name": "Son Kem Lì Satin 30ml",
+    "sku": "KC-0123",
+    "barcode": "893000000123",
+    "price": 159000,
+    "regular_price": 189000,
+    "sale_price": 159000,
+    "stock_quantity": 12,
+    "stock_status": "instock",
+    "image_url": null,
+    "type": "simple",
+    "status": "draft",
+    "created_via": "kc_pos"
+  }
+}
+```
+
+HTTP `201`. Barcode ghi vào meta `_mkc_barcode` — đúng key mà
+`GET /products/barcode/{barcode}` đọc, nên sản phẩm vừa tạo tra cứu được
+ngay. `price` là giá thực tế sau giảm giá.
+
+Mã lỗi:
+
+| Tình huống | HTTP | `code` |
+|---|---|---|
+| Chưa xác thực | `401` | `kc_not_authenticated` |
+| Không phải HTTPS | `403` | `kc_https_required` |
+| Thiếu capability | `403` | `kc_cannot_create_product` |
+| WooCommerce chưa active | `503` | `kc_woocommerce_unavailable` |
+| Body rỗng hoặc JSON hỏng | `400` | `kc_invalid_json` |
+| Body không phải JSON object | `400` | `kc_invalid_request` |
+| `name` rỗng / quá dài / sai kiểu | `400` | `kc_invalid_name` |
+| `barcode` sai định dạng | `400` | `kc_invalid_barcode` |
+| `sku` sai định dạng | `400` | `kc_invalid_sku` |
+| `regular_price` sai | `400` | `kc_invalid_price` |
+| `sale_price` sai | `400` | `kc_invalid_sale_price` |
+| Tồn kho sai | `400` | `kc_invalid_stock` |
+| `status` không hợp lệ | `400` | `kc_invalid_status` |
+| SKU đã tồn tại | `400` | `kc_duplicate_sku` |
+| Barcode đã tồn tại | `400` | `kc_duplicate_barcode` |
+| Không kiểm tra được trùng lặp | `500` | `kc_product_check_failed` |
+| Lỗi WooCommerce khi lưu | `500` | `kc_product_create_failed` |
+
+Kiểm tra trùng lặp chạy **trước** khi tạo: SKU bằng
+`wc_get_product_id_by_sku()` (tra cả sản phẩm và biến thể, an toàn với HPOS),
+barcode bằng `get_posts()` + `meta_query` trên `product` + `product_variation`,
+bao gồm cả key dự phòng `_barcode`. Nếu không tra được thì trả `500` chứ không
+tạo, để không sinh sản phẩm trùng mà app không biết.
+
+Ghi dữ liệu bằng WooCommerce CRUD chính thức (`new WC_Product_Simple()` +
+setter + `save()`). Không `wp_insert_post()`, không SQL, không bảng riêng. Tồn
+kho đi qua `set_manage_stock()` / `set_stock_quantity()` / `set_stock_status()`
+nên WooCommerce tự đồng bộ `_stock` và `_stock_status`.
+
+Route `GET /products` và `POST /products` được đăng ký trong **một** lệnh gọi
+`register_rest_route()` duy nhất (dạng danh sách endpoint), nên `args` phân
+trang của GET không bị mất.
+
 ### GET `/orders` — **yêu cầu xác thực**
 Danh sách đơn hàng WooCommerce (HPOS-safe, đọc bằng `wc_get_orders()`), mới nhất trước.
 Tham số: `page`, `per_page`, `status`, `search`, `date_from`, `date_to`.
@@ -307,6 +428,9 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 > `POST /pos/sales` (MVP-13) đã có mã trong `includes/class-pos.php` nhưng
 > **chưa upload production**: xem
 > [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md).
+>
+> `POST /products` cũng đã có mã trong `includes/class-product-create.php` và
+> **chưa upload production**: xem mục 4.
 
 > MVP-12 **không** thêm endpoint `POST /auth/login`. Xác thực dùng sẵn cơ chế
 > Application Password của WordPress, xem mục 6.
@@ -322,6 +446,7 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 | `GET /categories` | Public | Không |
 | `GET /variations` | Public | Không |
 | `GET /products/barcode/{barcode}` | **Bắt buộc** | Xem sản phẩm |
+| `POST /products` | **Bắt buộc** | `manage_woocommerce` |
 | `GET /orders` | **Bắt buộc** | Xem đơn hàng |
 | `GET /orders/{id}` | **Bắt buộc** | Xem đơn hàng |
 | `POST /pos/sales` | **Bắt buộc** | `manage_woocommerce` |
@@ -332,6 +457,9 @@ Chỉ ghi để nhớ hướng, **không phải kế hoạch bắt buộc**:
 "Xem sản phẩm" = `manage_woocommerce`, hoặc `edit_shop_products`, hoặc
 `edit_products` (theo thứ tự ưu tiên). Endpoint này cần quyền này vì trả cả
 sản phẩm nháp.
+
+`POST /products` và `POST /pos/sales` đều là endpoint ghi, nên yêu cầu
+`manage_woocommerce` — quyền cao nhất, không nới như endpoint đọc.
 
 Mã lỗi trả về:
 
@@ -349,9 +477,13 @@ Mã lỗi trả về:
 - WordPress tự xác thực và dựng `current_user`; plugin chỉ kiểm tra
   `is_user_logged_in()` và capability, không tự parse header.
 - Không có endpoint trả secret, token hay mật khẩu về app.
-- Endpoint ghi duy nhất là `POST /pos/sales` (`manage_woocommerce`, HTTPS bắt
-  buộc, có idempotency theo `request_id`). Chi tiết ở
-  [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md).
+- Có hai endpoint ghi, cả hai đều `manage_woocommerce` + HTTPS bắt buộc:
+  - `POST /pos/sales` — tạo đơn hàng, có idempotency theo `request_id`. Chi tiết ở
+    [POS_API_SPECIFICATION](POS_API_SPECIFICATION.md).
+  - `POST /products` — tạo sản phẩm simple, không idempotent, mặc định `draft`.
+    Chi tiết ở mục 4.
+- `GET /products/barcode/{barcode}` yêu cầu quyền xem sản phẩm vì trả cả sản
+  phẩm nháp, dù không ghi dữ liệu.
 - Xem [05_SECURITY](05_SECURITY.md).
 
 ## 7. Tài liệu liên quan

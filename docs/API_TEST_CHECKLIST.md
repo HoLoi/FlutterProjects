@@ -33,11 +33,13 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
 | `/variations` | GET | **Public** | `page`, `per_page` (1–50), `search`, `product_id` | `200` — danh sách biến thể `{id, product_id, name, sku, …, attributes[]}` | Mục 4.5 |
 | `/orders` | GET | **Application Password** | `page`, `per_page` (1–50), `search`, `status`, `date_from`, `date_to` | `200` — danh sách đơn có `line_items`; `401` nếu chưa xác thực; `403` nếu thiếu quyền | Mục 4.6 |
 | `/orders/{id}` | GET | **Application Password** | `id` (số nguyên > 0) | `200` — chi tiết đơn; `401` / `403` / `404` | Mục 4.7 |
+| `/products/barcode/{barcode}` | GET | **Application Password** | `barcode` trong path (1–64 ký tự, `A–Z a–z 0–9 . _ -`) | `200` — sản phẩm hoặc biến thể; `400` / `401` / `403` / `404` | Mục 4.8 |
+| `/products` | POST | **Application Password** + `manage_woocommerce` | JSON body: `name`, `barcode`, `regular_price` bắt buộc | `201` — `{success, product}`; `400` khi dữ liệu sai hoặc trùng | Mục 4.9 |
 
 ### Phân loại endpoint
 
-- **Public** (không cần đăng nhập): `/health`, `/products`, `/products/{id}`, `/categories`, `/variations`
-- **Cần Application Password**: `/orders`, `/orders/{id}`
+- **Public** (không cần đăng nhập): `/health`, `/products` (GET), `/products/{id}`, `/categories`, `/variations`
+- **Cần Application Password**: `/orders`, `/orders/{id}`, `/products/barcode/{barcode}` (GET), `/products` (POST)
 
 ---
 
@@ -50,7 +52,7 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
 3. Plugin `mypham-kim-cuong-manager` đã cài và **đang active**.
 4. Website có ít nhất vài sản phẩm, danh mục và đơn hàng thật để kiểm tra dữ liệu.
 
-### 3.2. Tạo Application Password (chỉ cần cho `/orders`)
+### 3.2. Tạo Application Password (cần cho `/orders`, `/products/barcode`, `POST /products`)
 
 1. Đăng nhập WordPress Admin.
 2. Vào **Hồ sơ người dùng** (`wp-admin/profile.php`).
@@ -576,6 +578,124 @@ curl.exe -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/orders/456"
 # Đơn không tồn tại → 404
 curl.exe -i -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/orders/99999999"
 ```
+
+### 4.8. `GET /products/barcode/{barcode}` — **CẦN APPLICATION PASSWORD**
+
+> Endpoint này trả cả sản phẩm nháp, nên yêu cầu quyền xem sản phẩm
+> (`manage_woocommerce`, hoặc `edit_shop_products`, hoặc `edit_products`).
+
+**Sản phẩm đơn giản:**
+
+```powershell
+# → 200, found=true, type=simple, variation_id=0, product_id = id sản phẩm
+curl.exe -s -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/893000000001"
+```
+
+**Biến thể:**
+
+```powershell
+# → 200, type=variation, product_id = id sản phẩm cha, variation_id = id biến thể,
+#    parent không null, attributes có ít nhất 1 phần tử
+curl.exe -s -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/893000000099"
+```
+
+**Kiểm tra lỗi mong đợi:**
+
+```powershell
+# Không xác thực → 401 kc_not_authenticated
+curl.exe -i "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/893000000001"
+
+# Barcode không tồn tại → 404 kc_not_found
+curl.exe -i -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/99999999999999"
+
+# Barcode rỗng → 400 kc_invalid_barcode (route vẫn khớp, không phải 404)
+curl.exe -i -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/"
+
+# Barcode sai ký tự (có dấu cách) → 400 kc_invalid_barcode
+curl.exe -i -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/893%20000"
+```
+
+**Kiểm tra bổ sung:**
+
+- Barcode của sản phẩm `draft` vẫn trả `200` (đây là lý do endpoint cần xác thực)
+- `GET /products/barcode/...` không làm hỏng `GET /products?page=1&per_page=10&search=son` (route dùng chung prefix)
+- `price` bằng `sale_price` nếu đang giảm giá, ngược lại bằng `regular_price`
+
+### 4.9. `POST /products` — **CẦN APPLICATION PASSWORD + `manage_woocommerce`**
+
+> **Endpoint này GHI dữ liệu thật.** Chỉ chạy trên staging hoặc với sản phẩm
+> thử có tên dễ nhận ra. Mặc định `status` là `draft` nên sản phẩm không hiện
+> trên website.
+
+**Tạo thành công:**
+
+```powershell
+$body = @'
+{
+  "name": "SPAM TEST barcode 20260928",
+  "barcode": "TEST-BC-20260928-01",
+  "sku": "TEST-SKU-20260928-01",
+  "regular_price": 100000,
+  "sale_price": 80000,
+  "stock_quantity": 5,
+  "status": "draft"
+}
+'@
+
+# → 201, success=true, product.barcode = "TEST-BC-20260928-01",
+#    product.price = 80000, product.status = "draft", product.created_via = "kc_pos"
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -u "ten_dang_nhap:$env:MKC_APP" `
+  -H "Content-Type: application/json" `
+  -d $body
+```
+
+**Sản phẩm tạo xong phải tra cứu lại được ngay:**
+
+```powershell
+# → 200, trùng đúng product.id vừa tạo
+curl.exe -s -u "ten_dang_nhap:$env:MKC_APP" "https://myphamkimcuong.id.vn/wp-json/kc/v1/products/barcode/TEST-BC-20260928-01"
+```
+
+**Kiểm tra lỗi mong đợi:**
+
+```powershell
+# Không xác thực → 401
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -H "Content-Type: application/json" -d '{"name":"x","barcode":"TEST-X","regular_price":1}'
+
+# Trùng barcode với lần tạo trước → 400 kc_duplicate_barcode
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -u "ten_dang_nhap:$env:MKC_APP" -H "Content-Type: application/json" `
+  -d '{"name":"x","barcode":"TEST-BC-20260928-01","regular_price":1}'
+
+# Thiếu name → 400 kc_invalid_name
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -u "ten_dang_nhap:$env:MKC_APP" -H "Content-Type: application/json" `
+  -d '{"barcode":"TEST-BC-NEW-01","regular_price":1}'
+
+# sale_price >= regular_price → 400 kc_invalid_sale_price
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -u "ten_dang_nhap:$env:MKC_APP" -H "Content-Type: application/json" `
+  -d '{"name":"x","barcode":"TEST-BC-NEW-02","regular_price":100,"sale_price":100}'
+
+# stock_quantity âm → 400 kc_invalid_stock
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -u "ten_dang_nhap:$env:MKC_APP" -H "Content-Type: application/json" `
+  -d '{"name":"x","barcode":"TEST-BC-NEW-03","regular_price":1,"stock_quantity":-5}'
+
+# Body không phải JSON → 400 kc_invalid_json
+curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
+  -u "ten_dang_nhap:$env:MKC_APP" -H "Content-Type: application/json" -d 'not json'
+```
+
+**Kiểm tra bổ sung:**
+
+- `GET /products?page=1&per_page=10` vẫn phân trang đúng sau khi thêm route POST
+  (route GET+POST phải dùng chung một lệnh `register_rest_route`)
+- Sản phẩm tạo ra hiện đúng tên, giá, tồn kho trong trang quản trị WooCommerce
+- Sản phẩm tạo ra có `created_via = kc_pos`
+- Tạo lại cùng barcode → `400`, KHÔNG tạo ra sản phẩm thứ hai
 
 ---
 

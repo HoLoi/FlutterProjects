@@ -8,9 +8,11 @@
 
 Plugin: `mypham-kim-cuong-manager` · Namespace: `kc/v1`
 
-Đây là **endpoint ghi duy nhất** của plugin. Toàn bộ endpoint còn lại
-(`/health`, `/products`, `/products/{id}`, `/categories`, `/variations`,
-`/orders`, `/orders/{id}`) vẫn là read-only và không bị thay đổi.
+File này đặc tả `POST /pos/sales`. Đây là endpoint ghi đơn hàng; endpoint ghi
+sản phẩm là `POST /products` — xem [03_API_SPECIFICATION](03_API_SPECIFICATION.md)
+mục 4. Toàn bộ endpoint còn lại (`/health`, `/products`, `/products/{id}`,
+`/categories`, `/variations`, `/orders`, `/orders/{id}`) vẫn là read-only và
+không bị thay đổi.
 
 Đặc tả tổng thể: [03_API_SPECIFICATION](03_API_SPECIFICATION.md) ·
 Bảo mật: [05_SECURITY](05_SECURITY.md)

@@ -2,8 +2,9 @@
 /**
  * POS sales API cho MyPham Kim Cuong Manager (namespace `kc/v1`).
  *
- * Đây là endpoint GHI DUY NHẤT của plugin: `POST /pos/sales`. Toàn bộ endpoint
- * còn lại trong `class-rest-api.php` là read-only và không bị file này đụng tới.
+ * Endpoint ghi của plugin: `POST /pos/sales`. Toàn bộ endpoint còn lại trong
+ * `class-rest-api.php` là read-only và không bị file này đụng tới. Các endpoint
+ * ghi khác nằm ở file riêng (`class-product-create.php`).
  *
  * Nguyên tắc bắt buộc:
  * - Tạo đơn bằng WooCommerce CRUD chính thức (`wc_create_order()`,
