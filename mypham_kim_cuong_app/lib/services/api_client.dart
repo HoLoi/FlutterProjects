@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/api_value.dart';
 import '../models/app_settings.dart';
+import '../models/pos_sale.dart';
 import 'auth_session.dart';
 
 /// Thông điệp chuẩn khi server từ chối truy cập endpoint đơn hàng.
@@ -15,6 +17,83 @@ class AuthErrorMessages {
   static const String forbidden = 'Tài khoản không có quyền xem đơn hàng';
   static const String notSignedIn = 'Bạn cần đăng nhập để xem đơn hàng';
 }
+
+/// Trạng thái của `POST /wp-json/kc/v1/pos/sales`.
+///
+/// Tách riêng từng nhóm lỗi vì POS cần hành động khác nhau: [unauthorized] thì
+/// mở màn hình đăng nhập, [outOfStock] thì báo người bán, còn [networkError] và
+/// [saleInProgress] thì **gửi lại cùng `request_id`** để server idempotency
+/// trả về đúng đơn đó.
+enum PosSaleStatus {
+  /// HTTP 201: vừa tạo đơn mới.
+  created,
+
+  /// HTTP 200: server trả lại đơn đã tạo từ request trước (`replayed: true`).
+  ok,
+
+  /// Chưa đăng nhập, chặn trước khi gọi mạng.
+  notSignedIn,
+
+  /// HTTP 401.
+  unauthorized,
+
+  /// HTTP 403, gồm cả khi gọi bằng `http` thay vì `https`.
+  forbidden,
+
+  /// HTTP 400: giỏ hàng không hợp lệ theo server.
+  invalidRequest,
+
+  /// HTTP 409 `kc_out_of_stock`.
+  outOfStock,
+
+  /// HTTP 409 `kc_sale_in_progress`: đơn cùng `request_id` đang được tạo.
+  saleInProgress,
+
+  /// HTTP 5xx, gồm cả 503 khi WooCommerce chưa active.
+  serverError,
+
+  /// Lỗi HTTP khác, hoặc body không đúng contract.
+  httpError,
+
+  /// Timeout hoặc không kết nối được máy chủ.
+  networkError,
+
+  /// Chưa cấu hình base URL.
+  invalidUrl,
+
+  /// Base URL dùng `http`; không gửi Basic Authorization qua kênh không mã hoá.
+  insecureUrl,
+}
+
+/// Kết quả thô của `POST /pos/sales` trước khi parse thành [PosSaleResult].
+class PosSaleResponse {
+  const PosSaleResponse({required this.status, this.data, this.message, this.code});
+
+  final PosSaleStatus status;
+
+  /// Envelope thành công nguyên bản; `null` khi có lỗi.
+  final Map<String, dynamic>? data;
+
+  /// Thông báo tiếng Việt từ server, hoặc thông báo mặc định của client.
+  final String? message;
+
+  /// Mã lỗi của WordPress, ví dụ `kc_out_of_stock`.
+  final String? code;
+
+  bool get succeeded =>
+      status == PosSaleStatus.created || status == PosSaleStatus.ok;
+
+  /// Có nên cho người bán bấm "Gửi lại" cùng `request_id` hay không.
+  ///
+  /// Chỉ khi server **chưa chắc** đã tạo đơn. Lỗi 400/409 tồn kho thì chắc chắn
+  /// chưa tạo, gửi lại vô ích; còn lỗi mạng và 500 thì có thể đơn đã tạo xong
+  /// mà app chưa nhận được phản hồi, nên phải gửi lại đúng khoá cũ.
+  bool get canRetryWithSameRequestId =>
+      status == PosSaleStatus.networkError ||
+      status == PosSaleStatus.serverError ||
+      status == PosSaleStatus.saleInProgress;
+}
+
 
 enum HealthStatus { online, offline, invalidUrl }
 
@@ -158,6 +237,7 @@ class ApiClient {
   static const String _categoriesPath = '/wp-json/kc/v1/categories';
   static const String _variationsPath = '/wp-json/kc/v1/variations';
   static const String _ordersPath = '/wp-json/kc/v1/orders';
+  static const String _posSalesPath = '/wp-json/kc/v1/pos/sales';
 
   static const Map<String, String> _publicHeaders = {
     'Accept': 'application/json',
@@ -560,6 +640,176 @@ class ApiClient {
         message: 'Không kết nối được máy chủ',
       );
     }
+  }
+
+  /// `POST /wp-json/kc/v1/pos/sales` — bán hàng tại cửa hàng.
+  ///
+  /// Đây là endpoint ghi đầu tiên của app nên có thêm ba lớp chặn trước khi gọi
+  /// mạng: chưa đăng nhập thì không gửi, base URL không phải `https` thì không
+  /// gửi (tránh rò Basic Authorization qua kênh không mã hoá), và
+  /// `items` rỗng thì không gửi.
+  ///
+  /// [requestId] là khoá idempotency do app sinh ra. Gửi lại **cùng** [requestId]
+  /// sẽ không tạo đơn thứ hai: server trả HTTP 200 kèm `replayed: true`.
+  ///
+  /// Không gửi giá: body chỉ có `product_id`, `variation_id`, `quantity`.
+  Future<PosSaleResponse> createPosSale({
+    required String requestId,
+    required String paymentMethod,
+    required int customerId,
+    required List<PosSaleItemRequest> items,
+    String customerNote = '',
+  }) async {
+    final uri = _apiUri(AppSettings.baseUrl, _posSalesPath);
+
+    if (uri == null) {
+      return const PosSaleResponse(
+        status: PosSaleStatus.invalidUrl,
+        message: 'URL chưa hợp lệ',
+      );
+    }
+
+    if (uri.scheme != 'https') {
+      return const PosSaleResponse(
+        status: PosSaleStatus.insecureUrl,
+        message:
+            'Chỉ thanh toán qua kết nối HTTPS. Đổi địa chỉ website sang https '
+            'trong Cài đặt rồi thử lại.',
+      );
+    }
+
+    if (!(authSession?.isSignedIn ?? false)) {
+      return const PosSaleResponse(
+        status: PosSaleStatus.notSignedIn,
+        message: 'Bạn cần đăng nhập để thanh toán',
+      );
+    }
+
+    if (items.isEmpty) {
+      return const PosSaleResponse(
+        status: PosSaleStatus.invalidRequest,
+        message: 'Giỏ hàng đang trống',
+      );
+    }
+
+    final body = jsonEncode({
+      'request_id': requestId,
+      'payment_method': paymentMethod,
+      'customer_id': customerId,
+      'customer_note': customerNote,
+      'items': items.map((item) => item.toJson()).toList(),
+    });
+
+    final headers = <String, String>{
+      ..._authHeaders(),
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      final response = await _httpClient
+          .post(uri, headers: headers, body: body)
+          .timeout(_timeout);
+
+      return _parsePosSaleResponse(response);
+    } on TimeoutException {
+      return const PosSaleResponse(
+        status: PosSaleStatus.networkError,
+        message: 'Hết thời gian chờ phản hồi',
+      );
+    } catch (_) {
+      return const PosSaleResponse(
+        status: PosSaleStatus.networkError,
+        message: 'Không kết nối được máy chủ',
+      );
+    }
+  }
+
+  /// Chuyển HTTP response thành [PosSaleResponse].
+  ///
+  /// Cố ý bắt lỗi theo **HTTP status** thay vì theo `code` của WordPress, giống
+  /// các endpoint GET: `code` có thể đổi, còn status thì ổn định.
+  PosSaleResponse _parsePosSaleResponse(http.Response response) {
+    final statusCode = response.statusCode;
+
+    if (statusCode == 200 || statusCode == 201) {
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, dynamic>) {
+          return const PosSaleResponse(
+            status: PosSaleStatus.httpError,
+            message: 'Phản hồi không hợp lệ',
+          );
+        }
+        if (decoded['success'] != true || ApiValue.object(decoded['order']) == null) {
+          return const PosSaleResponse(
+            status: PosSaleStatus.httpError,
+            message: 'Phản hồi không hợp lệ',
+          );
+        }
+        return PosSaleResponse(
+          status: statusCode == 201
+              ? PosSaleStatus.created
+              : PosSaleStatus.ok,
+          data: decoded,
+        );
+      } catch (_) {
+        return const PosSaleResponse(
+          status: PosSaleStatus.httpError,
+          message: 'Phản hồi không hợp lệ',
+        );
+      }
+    }
+
+    final error = parseErrorBody(response.body);
+    final message = _errorMessage(response, 'HTTP $statusCode');
+
+    if (statusCode == 401) {
+      return PosSaleResponse(
+        status: PosSaleStatus.unauthorized,
+        message: AuthErrorMessages.unauthorized,
+        code: error.code,
+      );
+    }
+
+    if (statusCode == 403) {
+      return PosSaleResponse(
+        status: PosSaleStatus.forbidden,
+        message: message,
+        code: error.code,
+      );
+    }
+
+    if (statusCode == 400) {
+      return PosSaleResponse(
+        status: PosSaleStatus.invalidRequest,
+        message: message,
+        code: error.code,
+      );
+    }
+
+    if (statusCode == 409) {
+      return PosSaleResponse(
+        status: error.code == 'kc_sale_in_progress'
+            ? PosSaleStatus.saleInProgress
+            : PosSaleStatus.outOfStock,
+        message: message,
+        code: error.code,
+      );
+    }
+
+    if (statusCode >= 500) {
+      return PosSaleResponse(
+        status: PosSaleStatus.serverError,
+        message: message,
+        code: error.code,
+      );
+    }
+
+    return PosSaleResponse(
+      status: PosSaleStatus.httpError,
+      message: message,
+      code: error.code,
+    );
   }
 
   /// Header cho request cần xác thực. Chỉ dùng cho endpoint đơn hàng.

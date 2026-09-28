@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../data/api_product_repository.dart';
 import '../data/product_repository.dart';
+import '../data/pos_sale_repository.dart';
 import '../models/app_settings.dart';
 import '../models/product.dart';
+import '../services/api_client.dart';
 import '../services/auth_session.dart';
 import '../services/cart_controller.dart';
 import '../services/dashboard_summary.dart';
+import '../services/pos_checkout_controller.dart';
 import '../services/stock_receiving_controller.dart';
 import 'login_screen.dart';
 import 'pos_screen.dart';
@@ -21,12 +25,20 @@ class DashboardScreen extends StatefulWidget {
     this.cart,
     this.stockController,
     this.authSession,
+    this.apiClient,
+    this.apiRepository,
+    this.posRepository,
+    this.posCheckout,
   });
 
   final ProductRepository? repository;
   final CartController? cart;
   final StockReceivingController? stockController;
   final AuthSession? authSession;
+  final ApiClient? apiClient;
+  final ApiProductRepository? apiRepository;
+  final PosSaleRepository? posRepository;
+  final PosCheckoutController? posCheckout;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -39,9 +51,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late final CartController _cart;
   late final StockReceivingController _stockController;
   late final AuthSession _authSession;
+  late final ApiClient _apiClient;
+  late final ApiProductRepository _apiRepository;
+  late final PosSaleRepository _posRepository;
+  late final PosCheckoutController _posCheckout;
 
   bool get _ownsCart => widget.cart == null;
   bool get _ownsStock => widget.stockController == null;
+  bool get _ownsPosCheckout => widget.posCheckout == null;
 
   @override
   void initState() {
@@ -50,6 +67,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _cart = widget.cart ?? CartController();
     _stockController = widget.stockController ?? StockReceivingController();
     _authSession = widget.authSession ?? AuthSession();
+    _apiClient = widget.apiClient ?? ApiClient(authSession: _authSession);
+    _apiRepository =
+        widget.apiRepository ?? ApiProductRepository(apiClient: _apiClient);
+    _posRepository =
+        widget.posRepository ?? ApiPosSaleRepository(apiClient: _apiClient);
+    _posCheckout = widget.posCheckout ?? PosCheckoutController();
     _screens = <Widget>[
       _DashboardHomePage(
         products: _repository.getProducts(),
@@ -58,7 +81,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       ProductListScreen(repository: _repository),
       OrderListScreen(authSession: _authSession, onRequireSignIn: _openLogin),
-      PosScreen(repository: _repository, cart: _cart),
+      PosScreen(
+        repository: _repository,
+        cart: _cart,
+        apiRepository: _apiRepository,
+        posRepository: _posRepository,
+        apiClient: _apiClient,
+        authSession: _authSession,
+        checkout: _posCheckout,
+      ),
       StockReceivingScreen(controller: _stockController),
     ];
   }
@@ -70,6 +101,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     if (_ownsStock) {
       _stockController.dispose();
+    }
+    if (_ownsPosCheckout) {
+      _posCheckout.dispose();
     }
     super.dispose();
   }
