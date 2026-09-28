@@ -434,16 +434,23 @@ class MKC_POS_API {
 				);
 			}
 
+			// Sản phẩm simple dùng `variation_id: 0` (hoặc bỏ trống) nghĩa là không
+			// dùng variation. Sản phẩm variable bắt buộc có variation_id > 0, được
+			// kiểm tra ở `resolve_products()` vì chỉ lúc đó mới biết kiểu sản phẩm.
+			//
+			// Dùng `non_negative_integer()` chứ không phải `positive_integer()` vì
+			// hàm kia từ chối 0, còn 0 là giá trị hợp lệ ở đây.
 			$variation_id = 0;
 			$raw_variation = isset( $row['variation_id'] ) ? $row['variation_id'] : 0;
 
+			// Bỏ trống, `null` và `''` đều nghĩa là không dùng variation.
 			if ( null !== $raw_variation && '' !== $raw_variation ) {
-				$variation_id = self::positive_integer( $raw_variation );
+				$variation_id = self::non_negative_integer( $raw_variation );
 
 				if ( null === $variation_id ) {
 					return self::error(
 						'kc_invalid_variation',
-						sprintf( 'items[%d].variation_id phải là số nguyên dương.', $index ),
+						sprintf( 'items[%d].variation_id phải là số nguyên không âm (0 = không dùng variation).', $index ),
 						400
 					);
 				}
@@ -625,8 +632,17 @@ class MKC_POS_API {
 			if ( $item['variation_id'] > 0 ) {
 				$variation = wc_get_product( $item['variation_id'] );
 
-				if ( ! $variation instanceof WC_Product_Variation
-					|| (int) $variation->get_parent_id() !== (int) $product->get_id() ) {
+				// Không tồn tại, hoặc tồn tại nhưng không thuộc sản phẩm cha: tách
+				// thông báo để dễ chẩn đoán, vẫn giữ nguyên mã lỗi và HTTP 400.
+				if ( ! $variation instanceof WC_Product_Variation ) {
+					return self::error(
+						'kc_invalid_variation',
+						sprintf( 'Không tìm thấy variation #%d.', $item['variation_id'] ),
+						400
+					);
+				}
+
+				if ( (int) $variation->get_parent_id() !== (int) $product->get_id() ) {
 					return self::error(
 						'kc_invalid_variation',
 						sprintf(
@@ -642,7 +658,10 @@ class MKC_POS_API {
 			} elseif ( $product->is_type( 'variable' ) ) {
 				return self::error(
 					'kc_invalid_variation',
-					sprintf( 'Sản phẩm #%d là sản phẩm biến thể, bắt buộc gửi variation_id.', $item['product_id'] ),
+					sprintf(
+						'Sản phẩm #%d là sản phẩm biến thể, bắt buộc gửi variation_id > 0 (gửi 0 hoặc bỏ trống sẽ bị từ chối).',
+						$item['product_id']
+					),
 					400
 				);
 			}

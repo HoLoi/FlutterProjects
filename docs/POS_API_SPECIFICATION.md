@@ -69,7 +69,7 @@ Vì sao `manage_woocommerce` mà không dùng `edit_shop_orders` như lúc xem �
 | `customer_id` | Không | int | `0` = khách lẻ, `> 0` = khách WordPress hợp lệ. Xem mục 3.1. |
 | `customer_note` | Không | string | Ghi chú, cắt còn tối đa 500 ký tự. |
 | `items[].product_id` | Có | int | Id sản phẩm WooCommerce, > 0. |
-| `items[].variation_id` | Không | int | `0` = không dùng variation. |
+| `items[].variation_id` | Không | int | Sản phẩm simple dùng `0`; sản phẩm variable cần `> 0`. Xem mục 3.2. |
 | `items[].quantity` | Có | int | Số nguyên dương, tối đa 9999. |
 
 ### 3.1. Quy tắc `customer_id`
@@ -95,19 +95,42 @@ customer_id > 0: khách WordPress hợp lệ
 | Số âm (`-1`), thập phân có phần lẻ (`1.5`, `"0.5"`) | `400` `kc_invalid_customer` |
 | `true` / `false`, mảng, đối tượng, `"abc"`, `"7abc"`, `"  "` | `400` `kc_invalid_customer` |
 
-Lưu ý: `product_id` và `quantity` dùng bộ chuyển đổi `positive_integer()` và vẫn
-phải `> 0`. Riêng `customer_id` dùng `non_negative_integer()` nên nhận `0`.
+### 3.2. Quy tắc `variation_id`
 
-> **Lỗi đã biết — `variation_id: 0` hiện bị từ chối.**
-> Bảng trên và ví dụ mục 3 quy định `variation_id: 0` nghĩa là "không dùng
-> variation", nhưng code hiện chuyển `0` qua `positive_integer()` nên trả
-> `400 kc_invalid_variation`. Ví dụ ở mục 3 **không chạy được** cho tới khi
-> sửa. Tạm thời gửi `variation_id: 1`… hoặc bỏ trường `variation_id`? Cả hai
-> đều không đúng ý nghĩa — sản phẩm đơn giản nên để nguyên khoá và bỏ hẳn
-> trường, nhưng khoá cũng bị từ chối. Cần sửa `class-pos.php` dòng 437–450
-> (thay `positive_integer()` bằng `non_negative_integer()`) rồi mới dùng được
-> mục này. Sửa cùng commit `77a3474` chưa thực hiện vì ngoài phạm vi thay đổi
-> `customer_id`.
+```text
+sản phẩm simple:   variation_id = 0   (không dùng variation)
+sản phẩm variable: variation_id > 0  (bắt buộc có variation)
+```
+
+Server chỉ biết kiểu sản phẩm sau khi nạp sản phẩm lên, nên `variation_id: 0`
+được chấp nhận ở bước kiểm tra hình thức; nếu sản phẩm hoá ra là **variable**
+thì mới báo lỗi yêu cầu variation.
+
+| Giá trị gửi lên | Kết quả |
+|---|---|
+| Bỏ trống (không có trường) | `0` — không dùng variation |
+| `null`, `""` | `0` — không dùng variation |
+| `0`, `"0"`, `" 0 "`, `0.0`, `"0.0"` | Chuẩn hoá thành `0` — không dùng variation |
+| Số nguyên `> 0` | Variation tương ứng, phải tồn tại và thuộc `product_id` |
+| Chuỗi `"2"` hoặc `2.0` | Chuẩn hoá thành `2` |
+| Số âm (`-1`), thập phân có phần lẻ (`1.5`, `"0.5"`) | `400` `kc_invalid_variation` |
+| `true` / `false`, mảng, đối tượng, `"abc"`, `"2abc"`, `"  "` | `400` `kc_invalid_variation` |
+
+Ma trận sản phẩm × variation:
+
+| Sản phẩm | `variation_id` | Kết quả |
+|---|---|---|
+| Simple | `0` hoặc bỏ trống | OK, bán chính sản phẩm |
+| Simple | `> 0` | `400` `kc_invalid_variation` — variation không thuộc sản phẩm cha |
+| Variable | `0` hoặc bỏ trống | `400` `kc_invalid_variation` — bắt buộc gửi `variation_id > 0` |
+| Variable | `> 0`, tồn tại, đúng cha | OK, bán variation đó |
+| Variable | `> 0`, không tồn tại | `400` `kc_invalid_variation` — không tìm thấy variation |
+| Variable | `> 0`, thuộc sản phẩm cha khác | `400` `kc_invalid_variation` — không thuộc sản phẩm cha |
+
+Lưu ý: `product_id` và `quantity` dùng bộ chuyển đổi `positive_integer()` và vẫn
+phải `> 0`. Riêng `customer_id` và `variation_id` dùng
+`non_negative_integer()` nên nhận `0`. Cả hai hàm đều từ chối số âm và không
+dùng `absint()` (vì `absint( '-5' )` trả 5 nên số âm sẽ lọt qua).
 
 
 
@@ -195,7 +218,8 @@ Mọi lỗi dùng cùng một định dạng JSON (chuẩn `WP_Error` của Word
 | Quá 50 dòng sản phẩm | `400` | `kc_too_many_items` |
 | `quantity` không phải số nguyên dương hoặc > 9999 | `400` | `kc_invalid_quantity` |
 | Trùng `product_id` + `variation_id` trong cùng lần bán | `400` | `kc_duplicate_item` |
-| `variation_id` không thuộc sản phẩm, hoặc sản phẩm biến thể mà thiếu variation | `400` | `kc_invalid_variation` |
+| `variation_id` sai định dạng (số âm, thập phân có phần lẻ, chuỗi, boolean, mảng) | `400` | `kc_invalid_variation` |
+| `variation_id` không tồn tại, hoặc không thuộc sản phẩm cha, hoặc sản phẩm biến thể mà gửi `variation_id` = 0 | `400` | `kc_invalid_variation` |
 | Sản phẩm không bán được: không publish, chưa có giá, sản phẩm ngoài | `400` | `kc_product_not_purchasable` |
 | `customer_id` không hợp lệ | `400` | `kc_invalid_customer` |
 | Sản phẩm không tồn tại | `404` | `kc_product_not_found` |
@@ -282,15 +306,21 @@ Khi được phép, thực hiện theo thứ tự an toàn:
    và **không** tạo đơn.
 4. Gửi `POST /pos/sales` với tài khoản không có `manage_woocommerce` → `403`.
 5. Gửi body hỏng (`{` hoặc `"abc"`) → `400`, không tạo đơn.
-6. Thiếu `request_id`, `items` rỗng, `quantity = 0`, `variation_id` sai cha,
-   `product_id` không tồn tại → lần lượt `400` / `404`, không tạo đơn.
-7. Dùng `request_id` cố định, gửi **hai lần** → lần một `201`, lần hai `200`
-   với `replayed: true` và **cùng** `order.id`; kiểm tra trong wp-admin chỉ có
-   **một** đơn và tồn kho chỉ trừ **một** lần.
-8. Một lần bán thật với số lượng vượt tồn kho → `409 kc_out_of_stock`, không tạo
-   đơn.
-9. Kiểm tra đơn trong wp-admin: `created_via = kc_pos`, đúng payment method,
-   đúng tổng tiền, tồn kho khớp.
+6. Thiếu `request_id`, `items` rỗng, `quantity = 0`, `product_id` không tồn tại
+   → lần lượt `400` / `404`, không tạo đơn.
+7. Sản phẩm **simple** với `variation_id: 0` → phải tạo được đơn (dùng đúng
+   `variation_id: 0`, `"0"`, `0.0`, `"0.0"` hoặc bỏ hẳn trường đều được).
+8. Sản phẩm **variable** với `variation_id: 0` → `400 kc_invalid_variation`.
+9. Sản phẩm **variable** với `variation_id` không tồn tại, hoặc thuộc sản phẩm
+   cha khác → `400 kc_invalid_variation`.
+10. `customer_id: 0` (khách lẻ) → phải tạo được đơn, đơn không gắn user.
+11. Dùng `request_id` cố định, gửi **hai lần** → lần một `201`, lần hai `200`
+    với `replayed: true` và **cùng** `order.id`; kiểm tra trong wp-admin chỉ có
+    **một** đơn và tồn kho chỉ trừ **một** lần.
+12. Một lần bán thật với số lượng vượt tồn kho → `409 kc_out_of_stock`, không tạo
+    đơn.
+13. Kiểm tra đơn trong wp-admin: `created_via = kc_pos`, đúng payment method,
+    đúng tổng tiền, tồn kho khớp.
 
 Danh sách kiểm tra tổng thể: [API_TEST_CHECKLIST](API_TEST_CHECKLIST.md).
 
