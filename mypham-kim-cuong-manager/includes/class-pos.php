@@ -326,20 +326,31 @@ class MKC_POS_API {
 	/**
 	 * `customer_id`: 0 (khách vãng lai) hoặc id khách hàng có thật.
 	 *
+	 * Cố ý KHÔNG dùng `positive_integer()`: hàm đó từ chối 0, trong khi 0 là giá
+	 * trị hợp lệ ở đây (khách vãng lai). Thiếu, `null` và `''` cũng là khách vãng
+	 * lai nên trả 0.
+	 *
 	 * @param array $payload Body đã decode.
 	 * @return int|WP_Error
 	 */
 	private static function read_customer_id( $payload ) {
+		// `isset()` trả false khi khoá thiếu HOẶC giá trị là `null`; cả hai đều
+		// được coi là khách vãng lai.
 		$raw = isset( $payload['customer_id'] ) ? $payload['customer_id'] : 0;
 
 		if ( null === $raw || '' === $raw ) {
 			return 0;
 		}
 
-		$customer_id = self::positive_integer( $raw );
+		$customer_id = self::non_negative_integer( $raw );
 
 		if ( null === $customer_id ) {
-			return self::error( 'kc_invalid_customer', 'customer_id phải là số nguyên dương hoặc 0.', 400 );
+			return self::error( 'kc_invalid_customer', 'customer_id phải là số nguyên không âm (0 = khách vãng lai) hoặc bỏ trống.', 400 );
+		}
+
+		// 0 là khách vãng lai: không tra `get_userdata( 0 )` vì luôn false.
+		if ( 0 === $customer_id ) {
+			return 0;
 		}
 
 		if ( ! get_userdata( $customer_id ) ) {
@@ -519,6 +530,50 @@ class MKC_POS_API {
 			}
 		}
 
+		return null;
+	}
+
+	/**
+	 * Chuyển số bất kỳ thành số nguyên không âm (0 được chấp nhận), hoặc null nếu
+	 * không hợp lệ.
+	 *
+	 * Chỉ dùng cho `customer_id`, nơi 0 hợp lệ. `product_id`, `variation_id` và
+	 * `quantity` vẫn dùng `positive_integer()` vì phải lớn hơn 0.
+	 *
+	 * Cùng nguyên tắc với `positive_integer()`: không dùng `absint()` (vì
+	 * `absint( '-5' )` trả 5 nên số âm sẽ lọt qua), và từ chối boolean, mảng,
+	 * đối tượng. Số thực nguyên (0.0) và chuỗi "0" được chuẩn hoá thành int 0;
+	 * số thập phân có phần lẻ (1.5) và số âm bị từ chối.
+	 *
+	 * @param mixed $value Giá trị thô.
+	 * @return int|null
+	 */
+	private static function non_negative_integer( $value ) {
+		if ( is_int( $value ) ) {
+			return ( $value >= 0 ) ? $value : null;
+		}
+
+		if ( is_float( $value ) ) {
+			if ( $value >= 0 && floor( $value ) === $value && $value <= PHP_INT_MAX ) {
+				return (int) $value;
+			}
+
+			return null;
+		}
+
+		if ( is_string( $value ) ) {
+			$value = trim( $value );
+
+			if ( preg_match( '/^[0-9]+(\.0+)?$/', $value ) ) {
+				$number = (float) $value;
+
+				if ( $number >= 0 && $number <= PHP_INT_MAX ) {
+					return (int) $number;
+				}
+			}
+		}
+
+		// boolean, array, object, null và chuỗi sai định dạng rơi xuống đây.
 		return null;
 	}
 

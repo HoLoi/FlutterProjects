@@ -66,11 +66,50 @@ Vì sao `manage_woocommerce` mà không dùng `edit_shop_orders` như lúc xem �
 |---|---|---|---|
 | `request_id` | Có | string | 1–64 ký tự, chỉ gồm `A–Z a–z 0–9 . _ : -`. Dùng làm khoá chống bấm thanh toán hai lần. |
 | `payment_method` | Có | string | Một trong `cash`, `bacs`, `vietqr`. |
-| `customer_id` | Không | int | `0` = khách vãng lai, hoặc id user có thật. |
+| `customer_id` | Không | int | `0` = khách lẻ, `> 0` = khách WordPress hợp lệ. Xem mục 3.1. |
 | `customer_note` | Không | string | Ghi chú, cắt còn tối đa 500 ký tự. |
 | `items[].product_id` | Có | int | Id sản phẩm WooCommerce, > 0. |
 | `items[].variation_id` | Không | int | `0` = không dùng variation. |
 | `items[].quantity` | Có | int | Số nguyên dương, tối đa 9999. |
+
+### 3.1. Quy tắc `customer_id`
+
+```text
+customer_id = 0: khách lẻ
+customer_id > 0: khách WordPress hợp lệ
+```
+
+`0` là khách lẻ: đơn được tạo không gắn user, server **không** tra
+`get_userdata( 0 )` (tra luôn ra `false`).
+
+| Giá trị gửi lên | Kết quả |
+|---|---|
+| Bỏ trống (không có trường) | `0` — khách lẻ |
+| `null` | `0` — khách lẻ |
+| `""` (chuỗi rỗng) | `0` — khách lẻ |
+| `0` | `0` — khách lẻ |
+| `"0"`, `" 0 "`, `0.0`, `"0.0"` | Chuẩn hoá thành `0` — khách lẻ |
+| Số nguyên `> 0` tồn tại trong WordPress | Dùng user đó |
+| Chuỗi `"42"` hoặc `42.0` của user tồn tại | Chuẩn hoá thành `42` |
+| Số nguyên `> 0` không tồn tại | `400` `kc_invalid_customer` |
+| Số âm (`-1`), thập phân có phần lẻ (`1.5`, `"0.5"`) | `400` `kc_invalid_customer` |
+| `true` / `false`, mảng, đối tượng, `"abc"`, `"7abc"`, `"  "` | `400` `kc_invalid_customer` |
+
+Lưu ý: `product_id` và `quantity` dùng bộ chuyển đổi `positive_integer()` và vẫn
+phải `> 0`. Riêng `customer_id` dùng `non_negative_integer()` nên nhận `0`.
+
+> **Lỗi đã biết — `variation_id: 0` hiện bị từ chối.**
+> Bảng trên và ví dụ mục 3 quy định `variation_id: 0` nghĩa là "không dùng
+> variation", nhưng code hiện chuyển `0` qua `positive_integer()` nên trả
+> `400 kc_invalid_variation`. Ví dụ ở mục 3 **không chạy được** cho tới khi
+> sửa. Tạm thời gửi `variation_id: 1`… hoặc bỏ trường `variation_id`? Cả hai
+> đều không đúng ý nghĩa — sản phẩm đơn giản nên để nguyên khoá và bỏ hẳn
+> trường, nhưng khoá cũng bị từ chối. Cần sửa `class-pos.php` dòng 437–450
+> (thay `positive_integer()` bằng `non_negative_integer()`) rồi mới dùng được
+> mục này. Sửa cùng commit `77a3474` chưa thực hiện vì ngoài phạm vi thay đổi
+> `customer_id`.
+
+
 
 Giới hạn khác: tối đa **50** dòng sản phẩm mỗi lần bán. Trong cùng một lần bán
 không được trùng `product_id` + `variation_id`.
