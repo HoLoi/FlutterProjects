@@ -26,6 +26,13 @@
  * - Xác thực bằng WordPress Application Password qua HTTPS + capability
  *   `manage_woocommerce`. Không JWT tự viết, không secret trong plugin.
  * - Không trả credential, không trả đường dẫn filesystem.
+ * - KHÔNG dùng `set_created_via()` / `get_created_via()` trên sản phẩm: đó là
+ *   thuộc tính của order và customer, không phải của product. Gọi nó trên
+ *   `WC_Product_Simple` rơi vào magic method `WC_Data::__call()` và làm request
+ *   chết với HTTP 500. Nếu cần đánh dấu nguồn gốc sản phẩm thì dùng meta riêng.
+ * - Mọi exception trong lúc tạo đều bị bắt, ghi ra log máy chủ kèm tên giai đoạn
+ *   và tên class exception, nhưng response chỉ trả mã lỗi chung. Log KHÔNG chứa
+ *   body request, header `Authorization`, mật khẩu hay dữ liệu khách hàng.
  *
  * Route `POST /products` được đăng ký bởi `MKC_REST_API` cùng GET `/products`
  * (xem `create_endpoint()`); file này chỉ cung cấp permission, validation và CRUD.
@@ -66,14 +73,25 @@ class MKC_Product_Create_API {
 	 */
 	const BARCODE_META = '_mkc_barcode';
 
-	/** Ghi vào `created_via` để mọi sản phẩm tạo từ POS đều nhận diện được. */
-	const CREATED_VIA = 'kc_pos';
+	/**
+	 * KHÔNG có hằng `CREATED_VIA` cho sản phẩm.
+	 *
+	 * `created_via` là thuộc tính của **order** (`WC_Abstract_Order`) và của
+	 * **customer**, không phải của product. `WC_Product` không khai báo prop
+	 * này, nên gọi `$product->set_created_via()` rơi vào magic method
+	 * `WC_Data::__call()` và làm request chết với HTTP 500. Nếu sau này cần
+	 * đánh dấu sản phẩm tạo từ POS thì dùng **meta** riêng, ví dụ
+	 * `_mkc_created_via`, chứ không dùng lại thuộc tính của order.
+	 */
 
 	/** Trạng thái sản phẩm được phép tạo. `draft` là mặc định. */
 	const ALLOWED_STATUSES = array( 'draft', 'publish' );
 
 	/** Trạng thái tồn kho được phép đặt tường minh. */
 	const ALLOWED_STOCK_STATUSES = array( 'instock', 'outofstock', 'onbackorder' );
+
+	/** Tên nguồn log khi ghi vào WooCommerce log. */
+	const LOG_SOURCE = 'mkc-product-create';
 
 	/**
 	 * Cấu hình endpoint `POST /products`.
@@ -763,15 +781,25 @@ class MKC_Product_Create_API {
 	 * 6. Đọc lại bằng `wc_get_product()` để response phản ánh đúng dữ liệu vừa
 	 *    lưu, kể cả giá mà WooCommerce đã chuẩn hoá.
 	 *
+	 * Endpoint này KHÔNG idempotent, nên một sản phẩm đã tạo không được phép
+	 * biến thành HTTP 500: app sẽ bấm lại và sinh sản phẩm trùng. Vì vậy từ bước
+	 * `save()` trở đi, lỗi chỉ được ghi ra log và response vẫn là 201 với payload
+	 * tối thiểu.
+	 *
 	 * @param array $input Dữ liệu đã chuẩn hoá.
 	 * @return WP_REST_Response|WP_Error
 	 */
 	private static function create_product( $input ) {
+		$stage = 'instantiate';
+
 		try {
 			$product = new WC_Product_Simple();
 		} catch ( \Throwable $e ) {
+			self::log_failure( $stage, $e );
 			return self::error( 'kc_product_create_failed', 'Không tạo được sản phẩm.', 500 );
 		}
+
+		$stage = 'set_props';
 
 		try {
 			$product->set_name( $input['name'] );
@@ -799,35 +827,109 @@ class MKC_Product_Create_API {
 
 			$product->set_stock_status( $input['stock_status'] );
 			$product->update_meta_data( self::BARCODE_META, $input['barcode'] );
-			$product->set_created_via( self::CREATED_VIA );
 
+			// Cố ý KHÔNG gọi `set_created_via()`: đó là thuộc tính của order,
+			// không phải của product. Xem ghi chú ở hằng BARCODE_META.
+		} catch ( \Throwable $e ) {
+			self::log_failure( $stage, $e );
+			return self::error( 'kc_product_create_failed', 'Không lưu được sản phẩm.', 500 );
+		}
+
+		$stage = 'save';
+
+		try {
 			$product_id = $product->save();
 		} catch ( \Throwable $e ) {
+			self::log_failure( $stage, $e );
 			return self::error( 'kc_product_create_failed', 'Không lưu được sản phẩm.', 500 );
 		}
 
 		$product_id = absint( $product_id );
 
 		if ( ! $product_id ) {
+			self::log_note( $stage, 'save() không trả về product id.' );
 			return self::error( 'kc_product_create_failed', 'Không lưu được sản phẩm.', 500 );
 		}
 
-		$created = wc_get_product( $product_id );
+		// Từ đây sản phẩm ĐÃ tồn tại trong database. Mọi lỗi còn lại chỉ ghi log
+		// và vẫn trả 201, để app không tạo lại và sinh bản trùng.
+		$stage = 'read_back';
 
-		if ( ! $created instanceof WC_Product ) {
-			return self::error( 'kc_product_create_failed', 'Không đọc lại được sản phẩm vừa tạo.', 500 );
+		try {
+			$created = wc_get_product( $product_id );
+		} catch ( \Throwable $e ) {
+			self::log_failure( $stage, $e );
+
+			return self::created_response( self::minimal_payload( $product_id, $input ) );
 		}
 
+		if ( ! $created instanceof WC_Product ) {
+			self::log_note( $stage, 'wc_get_product() không trả về WC_Product.' );
+
+			return self::created_response( self::minimal_payload( $product_id, $input ) );
+		}
+
+		$stage = 'serialize';
+
+		try {
+			$payload = self::serialize_created( $created );
+		} catch ( \Throwable $e ) {
+			self::log_failure( $stage, $e );
+
+			return self::created_response( self::minimal_payload( $product_id, $input ) );
+		}
+
+		return self::created_response( $payload );
+	}
+
+	/**
+	 * Bọc payload thành HTTP 201.
+	 *
+	 * @param array $payload Nội dung response.
+	 * @return WP_REST_Response
+	 */
+	private static function created_response( $payload ) {
 		$response = rest_ensure_response(
 			array(
 				'success' => true,
-				'product' => self::serialize_created( $created ),
+				'product' => $payload,
 			)
 		);
 
 		$response->set_status( 201 );
 
 		return $response;
+	}
+
+	/**
+	 * Payload tối thiểu dùng khi đọc lại sản phẩm lỗi.
+	 *
+	 * Chỉ dựa vào dữ liệu đã chuẩn hoá sẵn, không đọc gì thêm từ database, nên
+	 * không thể hỏng. Thiếu `id` thì app vẫn biết sản phẩm nào vừa được tạo và
+	 * không cần tạo lại.
+	 *
+	 * @param int   $product_id Id vừa tạo.
+	 * @param array $input     Dữ liệu đã chuẩn hoá.
+	 * @return array
+	 */
+	private static function minimal_payload( $product_id, $input ) {
+		return array(
+			'id'             => (int) $product_id,
+			'product_id'     => (int) $product_id,
+			'variation_id'   => 0,
+			'name'           => $input['name'],
+			'sku'            => self::text_or_null( $input['sku'] ),
+			'barcode'        => self::text_or_null( $input['barcode'] ),
+			'price'          => ( $input['sale_price'] > 0 ) ? $input['sale_price'] : $input['regular_price'],
+			'regular_price'  => $input['regular_price'],
+			'sale_price'     => ( $input['sale_price'] > 0 ) ? $input['sale_price'] : null,
+			'stock_quantity' => $input['manage_stock'] ? $input['stock_quantity'] : null,
+			'stock_status'   => $input['stock_status'],
+			'image_url'      => null,
+			'type'           => 'simple',
+			'status'         => $input['status'],
+			'created_via'    => null,
+		);
 	}
 
 	/* ---------------------------------------------------------------------
@@ -876,7 +978,12 @@ class MKC_Product_Create_API {
 			'image_url'      => $image_url,
 			'type'           => $product->get_type(),
 			'status'         => $product->get_status(),
-			'created_via'    => self::text_or_null( $product->get_created_via() ),
+
+			// Luôn null. `created_via` là thuộc tính của order/customer, product
+			// không có field này. Giữ nguyên key để app không đổi model, nhưng KHÔNG
+			// gọi `$product->get_created_via()`: đó là magic call lên prop không tồn
+			// tại và sẽ ném exception. Xem ghi chú ở hằng BARCODE_META.
+			'created_via'    => null,
 		);
 	}
 
@@ -894,6 +1001,142 @@ class MKC_Product_Create_API {
 	 */
 	private static function error( $code, $message, $status ) {
 		return new WP_Error( $code, $message, array( 'status' => (int) $status ) );
+	}
+
+	/**
+	 * Ghi lỗi nội bộ ra log máy chủ, KHÔNG gửi về app.
+	 *
+	 * HTTP response chỉ nhận mã lỗi và thông báo chung. Chi tiết lỗi thật nằm ở
+	 * log máy chủ (WooCommerce log nếu có, nếu không thì PHP error log), nơi chỉ
+	 * quản trị viên đọc được.
+	 *
+	 * Cố ý KHÔNG ghi vào log:
+	 * - body của request (chứa tên, barcode, giá),
+	 * - header `Authorization` và mọi thông tin đăng nhập / mật khẩu ứng dụng,
+	 * - dữ liệu khách hàng, dữ liệu đơn hàng,
+	 * - stack trace đầy đủ (nó kéo theo đường dẫn file máy chủ không cần thiết).
+	 *
+	 * Chỉ ghi: giai đoạn xử lý, class exception, mã exception, thông điệp (cắt
+	 * ngắn) và file:dòng phát sinh — đủ để tìm ra nguyên nhân thật mà không lộ
+	 * bí mật.
+	 *
+	 * @param string    $stage Giai đoạn xử lý (`instantiate`, `set_props`, `save`…).
+	 * @param \Throwable $e     Exception đã bắt.
+	 */
+	private static function log_failure( $stage, $e ) {
+		$message = method_exists( $e, 'getMessage' ) ? $e->getMessage() : '';
+		$message = self::truncate( self::redact( (string) $message ), 500 );
+
+		$origin = '';
+
+		if ( method_exists( $e, 'getFile' ) ) {
+			$origin = basename( (string) $e->getFile() ) . ':' . (int) $e->getLine();
+		}
+
+		self::log_internal(
+			sprintf(
+				'stage=%s exception=%s code=%s origin=%s message=%s',
+				$stage,
+				is_object( $e ) ? get_class( $e ) : gettype( $e ),
+				is_object( $e ) && method_exists( $e, 'getCode' ) ? (string) $e->getCode() : '0',
+				$origin,
+				$message
+			)
+		);
+	}
+
+	/**
+	 * Ghi một dòng chẩn đoán không kèm exception.
+	 *
+	 * @param string $stage   Giai đoạn xử lý.
+	 * @param string $message Mô tả ngắn.
+	 */
+	private static function log_note( $stage, $message ) {
+		self::log_internal(
+			sprintf(
+				'stage=%s note=%s',
+				$stage,
+				self::truncate( self::redact( (string) $message ), 500 )
+			)
+		);
+	}
+
+	/**
+	 * Bỏ dấu chuỗi có thể chứa dữ liệu nhạy cảm trước khi ghi log.
+	 *
+	 * Chỉ là lớp phòng thủ thứ hai. Luồng log vốn chỉ nhận tên giai đoạn, class
+	 * exception, file:dòng và message của exception — không có body request, không
+	 * có header, không có dữ liệu khách hàng. Các message của WooCommerce là
+	 * chuỗi tĩnh do developer viết.
+	 *
+	 * Cố ý KHÔNG dùng luật "mọi chuỗi dài đều là base64": luật đó xoá luôn tên
+	 * class và tên file hữu ích cho việc chẩn đoán, mà Application Password của
+	 * WordPress lại có khoảng trắng nên vốn không khớp. Thay vào đó khớp đúng
+	 * bốn dạng credential thật: header `Authorization`, cặp khoá–giá trị
+	 * (`password=`, `["api_key"] => "..."`), Application Password dạng 4–5 nhóm
+	 * ký tự, và cặp `user:pass` trần.
+	 *
+	 * @param string $message Thông điệp thô.
+	 * @return string
+	 */
+	private static function redact( $message ) {
+		$patterns = array(
+			// `Authorization: Basic <base64>` và `Bearer <token>`.
+			'/(authorization\s*:\s*)(basic|bearer)\s+\S+/i' => '$1[redacted]',
+
+			// `password=...`, `token => ...`, `api_key -> ...`, và cả dạng
+			// `["key"] => "value"` mà PHP var_dump in ra.
+			'/\b(authorization|passwd|password|pwd|secret|token|api[_-]?key)\b["\']?\s*\]?\s*[-:=]>?\s*["\']?\S+/i' => '$1=[redacted]',
+
+			// Application Password của WordPress: `abcd EFGH ijkl MNOP qrst`.
+			'/\b[a-z0-9]{4,5}(?:\s+[a-z0-9]{4,5}){3,4}\b/i' => '[redacted]',
+
+			// Cặp `user:pass` trần.
+			'/\b[\w.+-]+:[^\s:@]{6,}/' => '[redacted]',
+		);
+
+		$message = preg_replace(
+			array_keys( $patterns ),
+			array_values( $patterns ),
+			$message
+		);
+
+		// `preg_replace` trả null khi lỗi regex (ví dụ backtrack limit). Không
+		// được để null lọt vào log.
+		return null === $message ? '[unloggable]' : $message;
+	}
+
+	/**
+	 * Ghi dòng log ra WooCommerce log, fallback sang PHP error log.
+	 *
+	 * @param string $message Nội dung đã redact.
+	 */
+	private static function log_internal( $message ) {
+		$line = 'MKC product create: ' . $message;
+
+		if ( function_exists( 'wc_get_logger' ) ) {
+			try {
+				$logger = wc_get_logger();
+
+				if ( $logger ) {
+					$logger->error(
+						$line,
+						array( 'source' => self::LOG_SOURCE )
+					);
+				}
+			} catch ( \Throwable $e ) {
+				// Logger hỏng không được làm hỏng request; rơi xuống error_log.
+				unset( $e );
+			}
+		}
+
+		// Ghi luôn error_log: khi `wc_get_logger()` không tồn tại hoặc bị chặn ghi,
+		// đây là chỗ duy nhất còn lại để tìm nguyên nhân 500.
+		if ( ! function_exists( 'error_log' ) ) {
+			return;
+		}
+
+		error_log( $line );
 	}
 
 	/**

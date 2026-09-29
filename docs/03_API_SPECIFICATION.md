@@ -296,7 +296,7 @@ Sản phẩm trả về dùng chung model với `GET /products/barcode/{barcode}
     "image_url": null,
     "type": "simple",
     "status": "draft",
-    "created_via": "kc_pos"
+    "created_via": null
   }
 }
 ```
@@ -304,6 +304,12 @@ Sản phẩm trả về dùng chung model với `GET /products/barcode/{barcode}
 HTTP `201`. Barcode ghi vào meta `_mkc_barcode` — đúng key mà
 `GET /products/barcode/{barcode}` đọc, nên sản phẩm vừa tạo tra cứu được
 ngay. `price` là giá thực tế sau giảm giá.
+
+`created_via` luôn là `null`. Trường này là thuộc tính của **order** và
+**customer** trong WooCommerce, **không phải của product** — sản phẩm không có
+field đó. Khóa vẫn được giữ trong response để app không phải đổi model. Nếu sau
+này cần biết sản phẩm nào tạo từ POS, phải dùng meta riêng (ví dụ
+`_mkc_created_via`), tuyệt đối không gọi `set_created_via()` trên product.
 
 Mã lỗi:
 

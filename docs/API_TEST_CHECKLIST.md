@@ -34,7 +34,7 @@ sau khi upload lên website. Toàn bộ endpoint đều **chỉ đọc (GET)**.
 | `/orders` | GET | **Application Password** | `page`, `per_page` (1–50), `search`, `status`, `date_from`, `date_to` | `200` — danh sách đơn có `line_items`; `401` nếu chưa xác thực; `403` nếu thiếu quyền | Mục 4.6 |
 | `/orders/{id}` | GET | **Application Password** | `id` (số nguyên > 0) | `200` — chi tiết đơn; `401` / `403` / `404` | Mục 4.7 |
 | `/products/barcode/{barcode}` | GET | **Application Password** | `barcode` trong path (1–64 ký tự, `A–Z a–z 0–9 . _ -`) | `200` — sản phẩm hoặc biến thể; `400` / `401` / `403` / `404` | Mục 4.8 |
-| `/products` | POST | **Application Password** + `manage_woocommerce` | JSON body: `name`, `barcode`, `regular_price` bắt buộc | `201` — `{success, product}`; `400` khi dữ liệu sai hoặc trùng | Mục 4.9 |
+| `/products` | POST | **Application Password** + `manage_woocommerce` | JSON body: `name`, `barcode`, `regular_price` bắt buộc | `201` — `{success, product}`; `400` khi dữ liệu sai hoặc trùng; `500` xem mục 4.10 | Mục 4.9 |
 
 ### Phân loại endpoint
 
@@ -643,7 +643,7 @@ $body = @'
 '@
 
 # → 201, success=true, product.barcode = "TEST-BC-20260928-01",
-#    product.price = 80000, product.status = "draft", product.created_via = "kc_pos"
+#    product.price = 80000, product.status = "draft", product.created_via = null
 curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
   -u "ten_dang_nhap:$env:MKC_APP" `
   -H "Content-Type: application/json" `
@@ -694,8 +694,38 @@ curl.exe -i -X POST "https://myphamkimcuong.id.vn/wp-json/kc/v1/products" `
 - `GET /products?page=1&per_page=10` vẫn phân trang đúng sau khi thêm route POST
   (route GET+POST phải dùng chung một lệnh `register_rest_route`)
 - Sản phẩm tạo ra hiện đúng tên, giá, tồn kho trong trang quản trị WooCommerce
-- Sản phẩm tạo ra có `created_via = kc_pos`
+- `product.created_via` trả `null` (product không có trường này — đó là thuộc tính
+  của order; xem mục 4 của `03_API_SPECIFICATION.md`)
 - Tạo lại cùng barcode → `400`, KHÔNG tạo ra sản phẩm thứ hai
+
+### 4.10. Nếu `POST /products` trả 500
+
+Response chỉ có mã lỗi chung, **không** có stack trace. Sự thật nằm trong log máy
+chủ. Kiểm tra theo thứ tự:
+
+1. WooCommerce log: **WooCommerce → Status → Logs**, chọn nguồn
+   `mkc-product-create`.
+2. Nếu không có, xem PHP error log của hosting (thường ở
+   `wp-content/debug.log` nếu bật `WP_DEBUG_LOG`, hoặc log của Apache/PHP-FPM).
+
+Mỗi dòng log có dạng:
+
+```
+MKC product create: stage=<giai_doan> exception=<ten_class> code=<ma> origin=<file>:<dong> message=<thong_diep>
+```
+
+`stage` cho biết hỏng ở bước nào:
+
+| `stage` | Ý nghĩa |
+|---|---|
+| `instantiate` | Không khởi tạo được `WC_Product_Simple` — thường do WooCommerce chưa active đầy đủ |
+| `set_props` | Một setter của WooCommerce ném exception — thường do dùng prop không tồn tại trên product |
+| `save` | WooCommerce lưu xuống database thất bại — kiểm tra quyền ghi, HPOS, giá trị tồn kho |
+| `read_back` / `serialize` | Sản phẩm **đã tạo thành công**, chỉ lỗi khi đọc lại. Endpoint vẫn trả `201` |
+
+Lưu ý an toàn: log KHÔNG chứa body request, header `Authorization`, mật khẩu ứng
+dụng hay dữ liệu khách hàng. Chỉ có tên giai đoạn, tên class exception, mã
+exception, file:dòng và thông điệp của exception.
 
 ---
 
